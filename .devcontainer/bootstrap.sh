@@ -20,6 +20,13 @@ sudo apt-get install -y -qq libasound2t64 2>/dev/null \
 # FUSE для AppImage: в noble — libfuse2t64, в jammy — libfuse2
 sudo apt-get install -y -qq libfuse2t64 2>/dev/null || sudo apt-get install -y -qq libfuse2 2>/dev/null || true
 
+# --- каталоги ---
+# /opt принадлежит root; отдаём рабочие каталоги пользователю, чтобы все
+# скрипты (install-selkies, install-games, run-game, api_server) писали без sudo.
+echo "== dirs =="
+sudo mkdir -p /opt/selkies /opt/jbox/state /opt/games/src /opt/games/runtime
+sudo chown -R "$(id -u):$(id -g)" /opt/selkies /opt/jbox /opt/games
+
 # --- python deps для API (aiohttp) ---
 sudo pip3 install --quiet --break-system-packages aiohttp 2>/dev/null \
   || pip3 install --quiet --break-system-packages aiohttp \
@@ -50,13 +57,13 @@ export SELKIES_ENABLE_BASIC_AUTH=true
 export SELKIES_STOP_TIMEOUT=\${JBOX_STOP_TIMEOUT:-20}
 export JBOX_STOP_TIMEOUT=\${JBOX_STOP_TIMEOUT:-20}
 EOF
+  sudo chown "$(id -u):$(id -g)" /opt/jbox/env.sh
   echo "[bootstrap] passwords: host=$HOSTPW viewer=$VIEWPW (also in /opt/jbox/env.sh)"
 fi
 
 echo "== web client =="
 sudo cp -f "$HERE/../web/index.html" /opt/jbox/index.html
+sudo chown "$(id -u):$(id -g)" /opt/jbox/index.html
 
-echo "== dirs =="
-sudo mkdir -p /opt/games/runtime /opt/jbox/state
 sudo chmod +x "$HERE"/../scripts/*.sh 2>/dev/null || true
 echo "BOOTSTRAP-DONE"
