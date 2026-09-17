@@ -5,22 +5,43 @@ set -euo pipefail
 exec > /tmp/bootstrap.log 2>&1
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "== apt deps =="
+echo "[$(date +%H:%M:%S)] == apt deps =="
 export DEBIAN_FRONTEND=noninteractive
-sudo apt-get update -q
-sudo apt-get install -y -q \
+# "Reading package lists..." может висеть вечно, если лок держит параллельный
+# процесс (unattended-upgrades/apt-daily в codespace включён systemd) либо VM утонула в троттлинге.
+wait_apt_locks() {
+  local i
+  command -v fuser >/dev/null 2>&1 || return 0
+  for i in $(seq 1 60); do
+    sudo fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock >/dev/null 2>&1 || return 0
+    echo "[$(date +%H:%M:%S)] [bootstrap] apt/dpkg locks held — waiting ($i/60)"
+    sleep 5
+  done
+  echo "[bootstrap] WARN: apt locks still held after 5 min — continuing"
+}
+wait_apt_locks
+sudo systemctl stop unattended-upgrades.service apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+
+echo "[$(date +%H:%M:%S)] == apt update =="
+# пустые Post-Invoke отключают хуки apt (в контейнерах они умеют зависать),
+# timeout не даст молча висеть вечно; при сбое — сброс списков и повтор
+sudo timeout 900 apt-get \
+  -o APT::Update::Post-Invoke= -o APT::Update::Post-Invoke-Success= \
+  -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+  update -q || { echo "[bootstrap] apt update failed — resetting lists and retrying"; sudo rm -rf /var/lib/apt/lists/*; sudo timeout 900 apt-get update -q; }
+echo "[$(date +%H:%M:%S)] == apt install =="
+sudo timeout 900 apt-get install -y -q --no-install-recommends \
   python3 python3-pip curl ca-certificates \
   xvfb openbox xdotool x11-utils x11-xserver-utils \
   xserver-xorg-core \
+  xfonts-base \
   libgl1 libegl1 libgbm1 libxkbcommon0 \
   libpulse0 pulseaudio pulseaudio-utils \
-  fonts-dejavu-core >/dev/null
+  fonts-dejavu-core
 # ALSA: в Ubuntu 24.04 (noble) пакет называется libasound2t64, в 22.04 (jammy) — libasound2
 sudo apt-get install -y -q libasound2t64 2>/dev/null \
   || sudo apt-get install -y -q libasound2 2>/dev/null || true
-# xserver-xorg-core: утилиты cvt/gtf — Selkies строит через них modeline,
-# когда клиент просит разрешение, которого нет у Xvfb (иначе FATAL + "Waiting for stream...")
-# FUSE для AppImage: в noble — libfuse2t64, в jammy — libfuse2
+# xserver-xorg-core: cvt/gtf для modeline (см. блок install выше); xfonts-base — шрифты для Xvfb/openbox. FUSE: noble — libfuse2t64, jammy — libfuse2
 sudo apt-get install -y -q libfuse2t64 2>/dev/null || sudo apt-get install -y -q libfuse2 2>/dev/null || true
 
 # --- каталоги ---
