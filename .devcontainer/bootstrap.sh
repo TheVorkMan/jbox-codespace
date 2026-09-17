@@ -12,8 +12,12 @@ sudo apt-get install -y -qq \
   python3 python3-pip curl ca-certificates \
   xvfb openbox xdotool x11-utils x11-xserver-utils \
   libgl1 libegl1 libgbm1 libxkbcommon0 \
-  libasound2 libpulse0 pulseaudio pulseaudio-utils \
+  libpulse0 pulseaudio pulseaudio-utils \
   fonts-dejavu-core >/dev/null
+# ALSA: в Ubuntu 24.04 (noble) пакет называется libasound2t64, в 22.04 (jammy) — libasound2
+sudo apt-get install -y -qq libasound2t64 2>/dev/null \
+  || sudo apt-get install -y -qq libasound2 2>/dev/null || true
+# FUSE для AppImage: в noble — libfuse2t64, в jammy — libfuse2
 sudo apt-get install -y -qq libfuse2t64 2>/dev/null || sudo apt-get install -y -qq libfuse2 2>/dev/null || true
 
 # --- python deps для API (aiohttp) ---
