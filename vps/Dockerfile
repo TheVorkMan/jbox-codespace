@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y -qq \
     python3 python3-pip curl ca-certificates fuse3 libfuse2t64 \
-    xvfb openbox xdotool x11-utils x11-xserver-utils \
+    xvfb openbox xdotool x11-utils x11-xserver-utils xserver-xorg-core \
     libgl1 libegl1 libgbm1 libxkbcommon0 \
     libasound2t64 libpulse0 pulseaudio pulseaudio-utils \
     fonts-dejavu-core gh \

@@ -7,18 +7,21 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "== apt deps =="
 export DEBIAN_FRONTEND=noninteractive
-sudo apt-get update -qq
-sudo apt-get install -y -qq \
+sudo apt-get update -q
+sudo apt-get install -y -q \
   python3 python3-pip curl ca-certificates \
   xvfb openbox xdotool x11-utils x11-xserver-utils \
+  xserver-xorg-core \
   libgl1 libegl1 libgbm1 libxkbcommon0 \
   libpulse0 pulseaudio pulseaudio-utils \
   fonts-dejavu-core >/dev/null
 # ALSA: в Ubuntu 24.04 (noble) пакет называется libasound2t64, в 22.04 (jammy) — libasound2
-sudo apt-get install -y -qq libasound2t64 2>/dev/null \
-  || sudo apt-get install -y -qq libasound2 2>/dev/null || true
+sudo apt-get install -y -q libasound2t64 2>/dev/null \
+  || sudo apt-get install -y -q libasound2 2>/dev/null || true
+# xserver-xorg-core: утилиты cvt/gtf — Selkies строит через них modeline,
+# когда клиент просит разрешение, которого нет у Xvfb (иначе FATAL + "Waiting for stream...")
 # FUSE для AppImage: в noble — libfuse2t64, в jammy — libfuse2
-sudo apt-get install -y -qq libfuse2t64 2>/dev/null || sudo apt-get install -y -qq libfuse2 2>/dev/null || true
+sudo apt-get install -y -q libfuse2t64 2>/dev/null || sudo apt-get install -y -q libfuse2 2>/dev/null || true
 
 # --- каталоги ---
 # /opt принадлежит root; отдаём рабочие каталоги пользователю, чтобы все

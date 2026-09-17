@@ -11,6 +11,11 @@ ps aux | grep -E '[X]vfb|[o]penbox|[p]ulseaudio|[s]elkies' || echo "NONE RUNNING
 section "ports 8080/8081"
 ss -tln 2>/dev/null | grep -E ':(8080|8081) ' || echo "no listeners"
 
+section "modeline tools (cvt/gtf — нужны Selkies для ресайза)"
+for t in cvt gtf; do
+  if command -v "$t" >/dev/null; then echo "$t: $(command -v $t)"; else echo "$t: MISSING -> sudo apt-get install -y xserver-xorg-core"; fi
+done
+
 section "X display"
 DISPLAY="${DISPLAY:-:99}"
 if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then

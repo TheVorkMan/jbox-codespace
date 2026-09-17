@@ -14,7 +14,7 @@ API:
   GET  /api/chat?since=N                      — длинный опрос чата
   POST /api/chat                              — отправить сообщение
 """
-import asyncio, json, os, shutil, subprocess, time
+import asyncio, json, os, re, shutil, subprocess, time
 from pathlib import Path
 from aiohttp import web
 
@@ -24,16 +24,33 @@ STATE = Path("/opt/jbox/state"); STATE.mkdir(parents=True, exist_ok=True)
 PID = Path("/tmp/jbox-api.pid")
 
 # ---------- env ----------
+# env.sh пишется для bash: значения могут содержать ${VAR:-default}.
+# start-selkies.sh его source-ит (bash разворачивает сам), а этот сервер
+# парсит файл вручную — поэтому разворачиваем дефолты тут.
+def _expand_shell(v):
+    def repl_default(m):
+        name, _, default = m.group(1).partition(":-")
+        return os.environ.get(name, default)
+    v = re.sub(r"\$\{([^}]+)\}", repl_default, v)
+    v = re.sub(r"\$([A-Za-z_][A-Za-z0-9_]*)", lambda m: os.environ.get(m.group(1), ""), v)
+    return v
+
+def _int_env(v, default):
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return default
+
 ENV = {}
 _envsh = Path("/opt/jbox/env.sh")
 if _envsh.exists():
     for line in _envsh.read_text().splitlines():
         if line.startswith("export "):
             k, _, v = line[7:].partition("=")
-            ENV[k] = v.strip().strip('"').strip("'")
+            ENV[k] = _expand_shell(v.strip().strip('"').strip("'"))
 HOST_PW = ENV.get("SELKIES_BASIC_AUTH_PASSWORD", "")
 VIEW_PW = ENV.get("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD", "")
-STOP_TIMEOUT = int(ENV.get("JBOX_STOP_TIMEOUT", "20"))
+STOP_TIMEOUT = _int_env(ENV.get("JBOX_STOP_TIMEOUT", "20"), 20)
 
 # ---------- session state ----------
 session = {
