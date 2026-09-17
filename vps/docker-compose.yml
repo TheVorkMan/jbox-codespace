@@ -1,0 +1,21 @@
+services:
+  jbox:
+    build: ..
+    container_name: jbox
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      - JBOX_STOP_TIMEOUT=60
+      # опционально: зафиксировать пароли между перезапусками
+      # - SELKIES_BASIC_AUTH_PASSWORD=myhostpw
+      # - SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=myviewpw
+    volumes:
+      - gamecache:/opt/games/src
+      - runtime:/opt/games/runtime
+      - state:/opt/jbox/state
+    restart: unless-stopped
+volumes:
+  gamecache:
+  runtime:
+  state:

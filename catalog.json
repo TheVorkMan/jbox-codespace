@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "packs": {
+    "jps":   { "file": "jps.AppImage",   "bin": "TJPS_OpenGL",   "name": "The Jackbox Party Starter" },
+    "jpp2":  { "file": "jpp2.AppImage",  "bin": "TJPP2_OpenGL",  "name": "The Jackbox Party Pack 2" },
+    "jpp4":  { "file": "jpp4.AppImage",  "bin": "TJPP4_OpenGL",  "name": "The Jackbox Party Pack 4" },
+    "jpp11": { "file": "jpp11.AppImage", "bin": "TJPP11_OpenGL", "name": "The Jackbox Party Pack 11" }
+  },
+  "games": {
+    "jps": [
+      { "id": "jps.tjsp", "title": "Смехлыст 3",              "orig": "Quiplash 3",              "window": "Quiplash",                "player_min": 3, "player_max": 8 },
+      { "id": "jps.tjfe", "title": "Футбол К.О.",             "orig": "Joke Boat",               "window": "Joke Boat",               "player_min": 3, "player_max": 8 },
+      { "id": "jps.tjss", "title": "Смертельная вечеринка 2", "orig": "Job Job",                 "window": "Job Job",                 "player_min": 3, "player_max": 10 }
+    ],
+    "jpp2": [
+      { "id": "jpp2.bomb", "title": "Бомб-корп",  "orig": "Bomb Corp", "window": "Bomb Corp", "player_min": 1, "player_max": 4 },
+      { "id": "jpp2.mp3",  "title": "MP3-бред",   "orig": "Earwax",    "window": "Earwax",    "player_min": 3, "player_max": 8 }
+    ],
+    "jpp4": [
+      { "id": "jpp4.sdi", "title": "Выжить в интернете",   "orig": "Survive the Internet",      "window": "Survive the Internet",      "player_min": 3, "player_max": 8 },
+      { "id": "jpp4.mmh", "title": "Монстры ищут монстров", "orig": "Monster Seeking Monster",  "window": "Monster Seeking Monster",   "player_min": 3, "player_max": 7 }
+    ],
+    "jpp11": [
+      { "id": "jpp11.tkv2", "title": "ГРОМИНАНТ", "orig": "Tee K.O.",  "window": "Tee K.O.",  "player_min": 3, "player_max": 8 },
+      { "id": "jpp11.tsj",  "title": "Звук Вслух", "orig": "Timejinx",  "window": "Timejinx",  "player_min": 2, "player_max": 8 }
+    ]
+  },
+  "sources": {
+    "jps":   ["https://github.com/DdejjCAT/jackbox-files/releases/download/jps/part00",
+              "https://github.com/DdejjCAT/jackbox-files/releases/download/jps/part01"],
+    "jpp2":  ["https://github.com/DdejjCAT/jackbox-files/releases/download/jpp2/JPP2.AppImage"],
+    "jpp4":  ["https://serverly.s3.twcstorage.ru/JPP4-ru-(5of5)-(build-16)-WhatIf-04.08.2024.AppImage"],
+    "jpp11": ["https://serverly.s3.twcstorage.ru/Output.AppImage"]
+  }
+}
