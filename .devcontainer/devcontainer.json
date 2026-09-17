@@ -1,0 +1,21 @@
+{
+  "name": "jackbox-stream",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "hostRequirements": {
+    "cpus": 2,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "forwardPorts": [8080, 8081],
+  "portsAttributes": {
+    "8080": { "label": "Selkies stream (host)", "visibility": "public", "onAutoForward": "openBrowser" },
+    "8081": { "label": "Viewer page / API", "visibility": "public", "onAutoForward": "silent" }
+  },
+  "containerEnv": {
+    "SELKIES_FRAMERATE": "30",
+    "SELKIES_VIDEO_BITRATE": "6000",
+    "JBOX_STOP_TIMEOUT": "20"
+  },
+  "postCreateCommand": "bash .devcontainer/bootstrap.sh",
+  "postStartCommand": "bash .devcontainer/post-start.sh"
+}

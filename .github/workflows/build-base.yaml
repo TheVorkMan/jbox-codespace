@@ -1,0 +1,55 @@
+name: build-base-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      packs:
+        description: "Паки через запятую (пусто = все из catalog.json)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 4 1 * *"   # раз в месяц (или вручную, когда меняются источники)
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/jbox-base
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install selkies + deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl python3
+          bash .devcontainer/install-selkies.sh || true
+
+      - name: Download & extract all packs
+        run: |
+          PACKS="${{ github.event.inputs.packs }}"
+          bash .devcontainer/install-games.sh "$PACKS"
+          mkdir -p /tmp/layer
+          for p in /opt/games/src/*.AppImage; do
+            name=$(basename "$p" .AppImage)
+            (cd /opt/games/src && "./$name.AppImage" --appimage-extract >/dev/null)
+            mv /opt/games/src/squashfs-root "/tmp/layer/$name"
+          done
+          du -sh /tmp/layer/*
+
+      - name: Build base image (all packs pre-extracted)
+        run: |
+          echo "FROM scratch" > Dockerfile.base
+          echo "COPY layer/ /opt/games/runtime/" >> Dockerfile.base
+          cp -r /tmp/layer ./layer
+          docker build -f Dockerfile.base -t "$IMAGE:latest" .
+          docker tag "$IMAGE:latest" "$IMAGE:${GITHUB_RUN_ID}"
+
+      - name: Login GHCR & push
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${GITHUB_RUN_ID}"
