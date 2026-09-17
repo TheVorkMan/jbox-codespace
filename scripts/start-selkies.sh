@@ -1,28 +1,38 @@
 #!/usr/bin/env bash
-# Старт Selkies + окружение. Идемпотентен: если порт уже слушается — выходим.
+# Старт Selkies + окружение. Идемпотентен: если жив и слушает порт — пропускаем.
 # В Codespaces порт 8080 публикуется автоматически (forwardPorts + public).
 #
-# Selkies v2: encoder=h264enc (x264 soft на CPU), mode=websockets (работает за
-# HTTPS-прокси Codespaces, где UDP/WebRTC недоступен). X-сервер поднимаем сами
-# (Xvfb), Selkies подключается к нему через DISPLAY.
+# Почему живость по pid-файлу, а не по порту:
+#   - pkill -f '/opt/selkies/selkies' НЕ матчит реальный процесс AppImage;
+#   - "умирающий" selkies ещё держит порт -> скрипт считает его живым и
+#     уходит, оставляя стрим в состоянии "Waiting for stream...".
 set -uo pipefail
 PORT="${PORT:-8080}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIDFILE=/opt/jbox/state/selkies.pid
 
 [ -f /opt/jbox/env.sh ] && source /opt/jbox/env.sh
 mkdir -p /opt/jbox/state
 
-# --- X: Xvfb 1280x720 + openbox ---
+# --- X: Xvfb 1920x1080 + openbox ---
+# 1920x1080: веб-клиент запрашивает ресайз под своё окно (~1920x966).
 export DISPLAY="${DISPLAY:-:99}"
 if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
-  echo "[start] starting Xvfb $DISPLAY (1280x720)"
-  Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+  DISPNUM="${DISPLAY#:}"; DISPNUM="${DISPNUM%%.*}"
+  # stale-локи после падения Xvfb — без их очистки новый Xvfb не поднимется
+  rm -f "/tmp/.X${DISPNUM}-lock" "/tmp/.X11-unix/X${DISPNUM}"
+  echo "[start] starting Xvfb $DISPLAY (1920x1080)"
+  Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
   sleep 1
+  if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    echo "[start] Xvfb FAILED — /tmp/xvfb.log:" >&2
+    tail -10 /tmp/xvfb.log >&2 || true
+  fi
   setsid nohup openbox >/tmp/openbox.log 2>&1 &
   sleep 0.5
 fi
 
-# --- audio: pulseaudio user-инстанс + null-sink jbox (монитор слушает Selkies) ---
+# --- audio: pulseaudio user-инстанс + null-sink jbox (монитор читает Selkies) ---
 export XDG_RUNTIME_DIR=/tmp/xdg-jbox
 mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 if ! pactl info >/dev/null 2>&1; then
@@ -36,7 +46,21 @@ fi
 pactl set-default-sink jbox >/dev/null 2>&1 || true
 
 # --- Selkies ---
-if ! ss -tln 2>/dev/null | grep -q ":$PORT "; then
+PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+PORT_UP=no
+ss -tln 2>/dev/null | grep -q ":$PORT " && PORT_UP=yes
+
+if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null && [ "$PORT_UP" = yes ]; then
+  echo "[start] selkies already running (pid $PID) on :$PORT"
+else
+  [ -n "$PID" ] && { kill "$PID" 2>/dev/null || true; echo "[start] stale selkies pid $PID — restarting"; }
+  rm -f "$PIDFILE"
+  # порт мог остаться занят мёртвым/"умирающим" процессом (fuser матчит по порту)
+  if [ "$PORT_UP" = yes ]; then
+    echo "[start] port $PORT busy without live pid — freeing (fuser)"
+    fuser -k "$PORT"/tcp >/dev/null 2>&1 || true
+    sleep 1
+  fi
   echo "[start] launching selkies on :$PORT (websockets, h264enc/CPU)"
   setsid nohup /opt/selkies/selkies \
     --addr 0.0.0.0 \
@@ -60,18 +84,17 @@ if ! ss -tln 2>/dev/null | grep -q ":$PORT "; then
     --run-after-connect "${SELKIES_RUN_AFTER_CONNECT:-/opt/jbox/on-connect.sh}" \
     --run-after-disconnect "${SELKIES_RUN_AFTER_DISCONNECT:-/opt/jbox/on-disconnect.sh}" \
     >/tmp/selkies.log 2>&1 &
+  echo $! > "$PIDFILE"
   for i in $(seq 1 45); do
     ss -tln 2>/dev/null | grep -q ":$PORT " && break
     sleep 1
   done
   if ss -tln 2>/dev/null | grep -q ":$PORT "; then
-    echo "[start] selkies UP on :$PORT"
+    echo "[start] selkies UP on :$PORT (pid $(cat "$PIDFILE"), log /tmp/selkies.log)"
   else
     echo "[start] selkies FAILED — see /tmp/selkies.log:" >&2
     tail -20 /tmp/selkies.log >&2 || true
   fi
-else
-  echo "[start] selkies already running on :$PORT"
 fi
 
 echo "[start] done"
