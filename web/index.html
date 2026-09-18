@@ -115,7 +115,8 @@
         <div class="panel" id="host-tools" style="display:none">
           <h2>Лаунчер игр (только для хоста)</h2>
           <div id="games-list"></div>
-          <p class="muted">Пак докачается автоматически при первом запуске. Выбор игры внутри пака — кликом по превью в стриме.</p>
+          <p class="muted" id="games-status">игра не запущена</p>
+          <p class="muted">Первый запуск пака качает AppImage (до 1.5 GB, 2–5 мин) — статус по кнопке и в «игра: ...» ниже. Лог установки: /tmp/run-game-&lt;пак&gt;.log в терминале codespace.</p>
         </div>
       </div>
       <div class="panel" id="stream-open" style="cursor:pointer">
@@ -217,7 +218,7 @@ function render(s) {
     as.textContent = `⏻ автостоп через ${sec}s`;
   } else as.style.display = "none";
   // игры
-  if (ROLE === "host") renderGames(s.catalog, s.session.game);
+  if (ROLE === "host") renderGames(s.catalog, s.session);
   // игроки
   const names = Object.keys(s.session.players || {});
   $("players").innerHTML = names.length
@@ -230,25 +231,33 @@ function render(s) {
     $("stream").src = s.stream_url + "/";
     $("stream-wrap").classList.add("visible");
   }
-}
-
-function renderGames(cat, currentGame) {
+}function renderGames(cat, session) {
+  const currentGame = session.game, statuses = session.game_status || "", packs = session.packs || {};
+  const packLine = pid => {
+    const st = packs[pid] || { state: "absent", log: [] };
+    if (st.state === "ready")   return "<small style='color:var(--ok)'>готов</small>";
+    if (st.state === "cached")  return "<small style='color:var(--warn)'>скачан, распакуется при запуске</small>";
+    return "<small style='color:var(--err)'>нет источника — нужно задать URL в catalog.json</small>";
+  };
   const html = [];
   for (const [pid, p] of Object.entries(cat.packs || {})) {
-    html.push(`<div class="muted" style="margin:6px 0 2px">${esc(p.name)}</div>`);
+    html.push(`<div class='muted' style='margin:6px 0 2px'>${esc(p.name)} · ${packLine(pid)}</div>`);
     for (const g of (cat.games?.[pid] || [])) {
       const running = currentGame === g.id;
+      const busy = statuses.includes("starting") || statuses.includes("extracting");
       html.push(`
         <div class="game-card ${running ? "running" : ""}">
           <div><b>${esc(g.title)}</b><small>${esc(g.orig)} · ${g.player_min}–${g.player_max} игроков</small></div>
-          <button class="btn ${running ? "secondary" : ""}" ${running ? "disabled" : ""} data-game="${g.id}">
-            ${running ? "Идёт" : "Запустить"}
-</button>
+          <button class="btn ${running ? "secondary" : ""}" ${running || busy ? "disabled" : ""} data-game="${g.id}">
+            ${running ? "Идёт" : (busy ? "Установка..." : "Запустить")}
+          </button>
         </div>`);
     }
   }
   $("games-list").innerHTML = html.join("");
   $("games-list").querySelectorAll("[data-game]").forEach(b => b.onclick = () => launchGame(b.dataset.game));
+  const cg = currentGame ? `игра: ${esc(currentGame)} · ${esc(statuses || "")}` : "игра не запущена";
+  $("games-status").textContent = cg;
 }
 
 async function launchGame(gameId) {
