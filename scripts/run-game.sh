@@ -35,12 +35,27 @@ RT="/opt/games/runtime/$PACK"
 BIN="$RT/$PACK_BIN"
 
 # --- 1. распаковка при необходимости ---
+# Лог установки — отдельный файл на пак: /tmp/run-game-<pack>.log
+# (curl -# рисует прогресс-полосы; без tty их не будет, но [games]-строки — будут).
+# /opt/jbox/state/game_status: starting|running|failed — читается веб-клиентом.
 if [ ! -x "$BIN" ] || [ "$FORCE" = "--force" ]; then
-  echo "[run] extracting $PACK"
-  bash "$HERE/install-games.sh" "$PACK" || { echo "[run] download failed"; exit 2; }
-  rm -rf "$RT" /opt/games/src/"$PACK".squashfs-root
-  (cd /opt/games/src && "$PACK.AppImage" --appimage-extract >/dev/null 2>&1) || { echo "[run] extract failed"; exit 3; }
+  echo "$GAME_ID starting" > /opt/jbox/state/game_status
+  echo "[run] downloading/extracting $PACK (log: /tmp/run-game-$PACK.log)"
+  bash "$HERE/install-games.sh" "$PACK" > "/tmp/run-game-$PACK.log" 2>&1
+  rc=$?
+  tail -3 "/tmp/run-game-$PACK.log" | sed 's/^/[run] /'
+  if [ $rc -ne 0 ]; then
+    echo "[run] download FAILED (rc=$rc) — полный лог: /tmp/run-game-$PACK.log"
+    echo "$GAME_ID failed" > /opt/jbox/state/game_status
+    rm -f /opt/jbox/state/current_game
+    exit 2
+  fi
+  rm -rf "$RT"
+  # AppImage-бинарник нужно вызывать с ./ из его каталога (PATH/текущий-каталог)
+  (cd /opt/games/src && "./$PACK.AppImage" --appimage-extract >/tmp/extract-$PACK.log 2>&1) \
+    || { echo "[run] extract failed — /tmp/extract-$PACK.log"; echo "$GAME_ID failed" > /opt/jbox/state/game_status; rm -f /opt/jbox/state/current_game; exit 3; }
   mv /opt/games/src/squashfs-root "$RT"
+  echo "[run] extracted to $RT"
 fi
 
 # --- 2. убить предыдущую игру (если была) ---
@@ -55,6 +70,7 @@ export SDL_AUDIODRIVER=pulseaudio
 setsid nohup "$BIN" >/tmp/game.log 2>&1 &
 GAME_PID=$!
 echo "$GAME_PID" > /opt/jbox/state/game.pid
+echo "$GAME_ID running" > /opt/jbox/state/game_status
 echo "[run] started $GAME_ID (pid $GAME_PID, log /tmp/game.log)"
 
 # --- 4. фокус окна игры ---

@@ -12,6 +12,8 @@ if [ -d "$HERE/../scripts" ]; then
   sudo cp -f "$HERE/install-games.sh" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/../catalog.json" /opt/games/catalog.json 2>/dev/null || true
   sudo chmod +x /opt/jbox/*.sh 2>/dev/null || true
+  # скрипты пишут в /opt/games и /opt/jbox от пользователя — отдать владение
+  sudo chown -R "$(id -u):$(id -g)" /opt/jbox /opt/games 2>/dev/null || true
 fi
 
 # --- Selkies ещё не установлен? (после полного rebuild контейнера) ---

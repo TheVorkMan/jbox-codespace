@@ -20,6 +20,14 @@ from aiohttp import web
 
 CATALOG_PATH = Path("/opt/games/catalog.json")
 CATALOG = json.load(open(CATALOG_PATH)) if CATALOG_PATH.exists() else {"packs": {}, "games": {}}
+# каталог перечитываем при каждом /api/state: post-start может скопировать
+# catalog.json ПОЗЖЕ старта этого сервера — иначе лаунчер навсегда пустой
+def reload_catalog():
+    global CATALOG
+    try:
+        CATALOG = json.load(open(CATALOG_PATH))
+    except Exception:
+        pass
 STATE = Path("/opt/jbox/state"); STATE.mkdir(parents=True, exist_ok=True)
 PID = Path("/tmp/jbox-api.pid")
 
@@ -80,8 +88,15 @@ def read(path, default=None):
     try: return Path(path).read_text().strip()
     except Exception: return default
 
+BG_LOG = "/tmp/jbox-api-bg.log"
 def run_bg(cmd):
-    subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # stdout/stderr фоновых задач — в лог, а не в /dev/null (иначе диагностике конец)
+    try:
+        f = open(BG_LOG, "ab")
+        f.write(f"\n[{time.strftime('%m-%d %H:%M:%S')}] $ {cmd}\n".encode())
+        subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
+    except Exception:
+        subprocess.Popen(cmd, shell=True)
 
 def is_codespace():
     return bool(os.environ.get("CODESPACE_NAME"))
@@ -92,14 +107,33 @@ def role_ok(role, key):
     if role == "viewer": return key and (key == VIEW_PW or key == HOST_PW)
     return False
 
+def pack_states():
+    """Состояние каждого пака: ready (распакован) / cached (AppImage скачан) /
+    absent + хвост лога установки — для индикации в лаунчере."""
+    out = {}
+    for pid, p in (CATALOG.get("packs") or {}).items():
+        bin_path = Path("/opt/games/runtime") / pid / p.get("bin", "x")
+        src = Path("/opt/games/src") / f"{pid}.AppImage"
+        state = "absent"
+        if bin_path.exists(): state = "ready"
+        elif src.exists(): state = "cached"
+        log = Path(f"/tmp/run-game-{pid}.log")
+        tail = []
+        if log.exists():
+            tail = [l for l in log.read_text(errors="replace").strip().splitlines()[-4:]]
+        out[pid] = {"state": state, "log": tail}
+    return out
+
 def session_state():
     return {
         "uptime_s": int(time.time() - session["started"]),
         "game": read(STATE / "current_game", None),
+        "game_status": read(STATE / "game_status", ""),
         "game_pid": int(read(STATE / "game.pid", "0") or 0),
         "auto_stop_at": session["auto_stop_at"],
         "is_codespace": is_codespace(),
         "players": {n: int(time.time() - p["ts"]) for n, p in session["players"].items()},
+        "packs": pack_states(),
     }
 
 def stream_url(request):
@@ -125,6 +159,7 @@ async def index(_):
     return web.FileResponse("/opt/jbox/index.html")
 
 async def api_state(request):
+    reload_catalog()
     role = request.query.get("role", "viewer")
     key = request.query.get("key", "")
     if not role_ok(role, key):
@@ -148,7 +183,7 @@ async def api_launch(request):
     pack = game_id.split(".")[0]
     if pack not in CATALOG.get("packs", {}):
         return web.json_response({"error": "unknown pack"}, status=400)
-    run_bg(f"DISPLAY=:99 /opt/jbox/run-game.sh {game_id!r} > /tmp/run-game.log 2>&1")
+    run_bg(f"DISPLAY=:99 /opt/jbox/run-game.sh {game_id!r} >> /tmp/run-game.log 2>&1")
     return web.json_response({"ok": True, "game_id": game_id})
 
 async def api_stop_game(request):
