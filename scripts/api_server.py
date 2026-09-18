@@ -108,14 +108,18 @@ def role_ok(role, key):
     return False
 
 def pack_states():
-    """Состояние каждого пака: ready (распакован) / cached (AppImage скачан) /
-    absent + хвост лога установки — для индикации в лаунчере."""
+    """Состояние каждого пака: ready (распакован: AppRun/бинарник на месте) /
+    cached (AppImage скачан) / absent + хвост лога установки — для лаунчера."""
     out = {}
     for pid, p in (CATALOG.get("packs") or {}).items():
-        bin_path = Path("/opt/games/runtime") / pid / p.get("bin", "x")
+        base = Path("/opt/games/runtime") / pid
+        bin_name = p.get("bin", "x")
+        ready = ((base / "AppRun").exists()
+                 or (base / bin_name).exists()
+                 or (base / "bin" / bin_name).exists())
         src = Path("/opt/games/src") / f"{pid}.AppImage"
         state = "absent"
-        if bin_path.exists(): state = "ready"
+        if ready: state = "ready"
         elif src.exists(): state = "cached"
         log = Path(f"/tmp/run-game-{pid}.log")
         tail = []
