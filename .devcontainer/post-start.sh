@@ -24,6 +24,7 @@ fi
 # --- SECURITY fixup: равные host/viewonly пароли дают зрителю контроллер ---
 # Selkies назначает потолок "viewer" только если viewonly != host-пароль.
 # env.sh уже существующий bootstrap не перегенерирует — лечим тут, на каждом старте.
+RESTART_STREAM=0
 if [ -f /opt/jbox/env.sh ]; then
   # shellcheck disable=SC1091
   . /opt/jbox/env.sh 2>/dev/null || true
@@ -32,6 +33,7 @@ if [ -f /opt/jbox/env.sh ]; then
     NEWV="$(head -c16 /dev/urandom | md5sum | cut -c1-10)"
     sed -i "s|^export SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=.*|export SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=$NEWV|" /opt/jbox/env.sh
     sed -i "s|^export JBOX_VIEW_PW=.*|export JBOX_VIEW_PW=$NEWV|" /opt/jbox/env.sh
+    RESTART_STREAM=1
     echo "[post-start] WARN: host и viewonly пароли были равны — viewonly перегенерирован (зрители теперь без инпута)"
   fi
 fi
@@ -43,6 +45,16 @@ if [ ! -x /opt/selkies/selkies ]; then
 fi
 
 # --- старт стрима и API ---
+# Если пароли только что починены — перезапустить Selkies и API принудительно:
+# оба держат креды в памяти (start-скрипт иначе пропустит живой процесс,
+# а API кэширует env на старте) — и зритель оставался бы контроллером.
+if [ "$RESTART_STREAM" = 1 ]; then
+  echo "[post-start] restarting selkies+api to apply new credentials"
+  pkill -9 -f selkies 2>/dev/null || true
+  pkill -f api_server.py 2>/dev/null || true
+  rm -f /opt/jbox/state/selkies.pid
+  sleep 1
+fi
 nohup bash /opt/jbox/start-selkies.sh >/tmp/start-selkies.out 2>&1 &
 nohup python3 /opt/jbox/api_server.py >/tmp/api.log 2>&1 &
 
