@@ -69,7 +69,8 @@ def load_games():
         try:
             head = f.read_text(errors="replace").splitlines()[:2]
             comment = head[1][2:].strip() if len(head) > 1 and head[1].startswith("# ") else ""
-            pack, _, title = comment.partition(" — ")
+            # формат заголовка лаунчера: "# Название игры — Пак"
+            title, _, pack = comment.partition(" — ")
             body = f.read_text(errors="replace")
             m = re.search(r'launchTo (games/[^ ]+\.swf)', body)
             swf = m.group(1) if m else ""

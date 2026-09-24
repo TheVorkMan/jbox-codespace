@@ -180,7 +180,9 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
       <div class="body">
         <input class="search" id="gSearch" placeholder="Поиск игры…">
         <div id="gameList"></div>
-        <button class="mbtn primary" id="launchNow">Запустить выбранное</button>
+      </div>
+      <div id="launchBar" style="display:none;padding:12px 20px;border-top:1px solid var(--surface2);background:var(--surface)">
+        <button class="mbtn primary" id="launchNow" style="width:100%">Запустить</button>
       </div>
     </div>
   </div>
@@ -292,6 +294,7 @@ async function poll(){
     const d=await r.json();
     if(d.key&&d.key!==S.key)S.key=d.key;   // анонимному гостю сервер выдал ключ сессии
     S.games=d.games||[];
+    S.session=d.session||{};
     const st=d.session||{};
     $('statusDot').className = d.selkies_up ? 'ok' : '';
     $('gameLabel').textContent = st.game ? ('игра: ' + st.game) : '';
@@ -317,24 +320,28 @@ async function poll(){
 function renderGames(){
   const q=($('gSearch').value||'').toLowerCase();
   const list=$('gameList');list.innerHTML='';
+  const st=(S.session&&S.session.game)||null;   // реально запущенная игра (по state)
   const flt=S.games.filter(g=>!q||g.title.toLowerCase().includes(q)||g.id.toLowerCase().includes(q));
   for(const g of flt){
+    const live=st===g.id;
     const b=document.createElement('button');
-    b.className='gitem'+(g.ok?'':' dis')+(S.sel===g.id?' live':'');
-    b.innerHTML=`<span class="t">${esc(g.pack)}</span><span class="p">${esc(g.title)}</span>${S.sel===g.id?'<span class="pill">запущена</span>':''}`;
+    b.className='gitem'+(g.ok?'':' dis')+(live?' live':'');
+    b.innerHTML=`<span class="t">${esc(g.title)}</span><span class="p">${esc(g.pack)}</span>${live?'<span class="pill">запущена</span>':''}`;
     b.onclick=()=>{S.sel=g.id;renderGames()};
     b.ondblclick=()=>launch(g.id);
     list.appendChild(b);
   }
-  $('launchNow').style.display=S.sel?'block':'none';
+  // кнопка запуска — в закреплённом футере панели: видна без скролла
+  $('launchBar').style.display=S.sel?'block':'none';
   $('launchNow').textContent='Запустить: '+(S.games.find(g=>g.id===S.sel)||{title:S.sel}).title;
 }
 $('gSearch').addEventListener('input',renderGames);
 $('launchNow').onclick=()=>S.sel&&launch(S.sel);
 async function launch(id){
+  const g=S.games.find(x=>x.id===id);
   const r=await fetch('/api/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:S.key,game_id:id})});
   const d=await r.json();
-  if(d.ok){toast('Запускаю: '+id);closeOv('ovLaunch')}
+  if(d.ok){toast('Запускаю: '+(g?g.title:id));closeOv('ovLaunch')}
   else toast('Ошибка: '+(d.error||r.status));
 }
 

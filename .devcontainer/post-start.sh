@@ -12,6 +12,11 @@ if [ -d "$HERE/../scripts" ]; then
   sudo cp -f "$HERE/../scripts/api_server.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/install-games.sh" /opt/jbox/ 2>/dev/null || true
   sudo chmod +x /opt/jbox/*.sh 2>/dev/null || true
+  # лаунчеры из репо перекрывают содержимое бандла (там могут быть пропуски)
+  if [ -d "$HERE/../launchers" ] && [ -d /opt/jbox-unified/launchers ]; then
+    sudo cp -f "$HERE/../launchers/"*.sh /opt/jbox-unified/launchers/ 2>/dev/null || true
+    sudo chmod +x /opt/jbox-unified/launchers/*.sh 2>/dev/null || true
+  fi
   # скрипты пишут в /opt/* от пользователя — отдать владение
   sudo chown -R "$(id -u):$(id -g)" /opt/jbox /opt/jbox-unified 2>/dev/null || true
 fi
