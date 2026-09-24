@@ -69,6 +69,12 @@ echo "starting" > "$STATE/game_status"
 rm -f "$STATE/keepalive"
 
 export DISPLAY
+# --- аудио: игра должна найти pulse-сокет сессии (как в jps-docker) ---
+# Без XDG_RUNTIME_DIR/PULSE_SERVER игра валится на ALSA/умолчания и молчит.
+export XDG_RUNTIME_DIR=/tmp/xdg-jbox
+export PULSE_SERVER=unix:$XDG_RUNTIME_DIR/pulse/native
+export PULSE_SINK=jbox
+export SDL_AUDIODRIVER=pulse
 setsid nohup bash "$LAUNCHER" >"$LOG" 2>&1 &
 PID=$!
 echo "$PID" > "$STATE/game.pid"

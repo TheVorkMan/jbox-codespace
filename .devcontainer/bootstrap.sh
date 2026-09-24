@@ -59,6 +59,14 @@ sudo env DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true \
 # ALSA: в Ubuntu 24.04 (noble) пакет называется libasound2t64, в 22.04 (jammy) — libasound2
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libasound2t64 2>/dev/null \
   || sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libasound2 2>/dev/null || true
+# ALSA-приложения (FMOD-фолбэк игры) направляем в pulse: без этого — тишина
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libasound2-plugins 2>/dev/null || true
+if sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libasound2-plugins >/dev/null 2>&1; then
+  sudo tee /etc/asound.conf >/dev/null <<'ASOUND' || true
+pcm.!default { type pulse hint.description "PulseAudio" }
+ctl.!default { type pulse }
+ASOUND
+fi
 # xserver-xorg-core: cvt/gtf для modeline (см. блок install выше); xfonts-base — шрифты для Xvfb/openbox. FUSE: noble — libfuse2t64, jammy — libfuse2
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libfuse2t64 2>/dev/null || sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libfuse2 2>/dev/null || true
 
