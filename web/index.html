@@ -117,9 +117,12 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
 <div id="gate">
   <div class="card">
     <h1>Jackbox Cloud</h1>
-    <p>Введите ключ сессии. Ключ хоста даёт управление, ключ зрителя — только просмотр.</p>
-    <input id="keyIn" type="password" placeholder="Ключ сессии" autocomplete="off">
-    <div class="row"><button id="goBtn" class="mbtn primary" style="flex:1">Войти</button></div>
+    <p>Зритель входит без ключа. Хост вводит ключ сессии.</p>
+    <button id="guestBtn" class="mbtn primary" style="width:100%">Смотреть</button>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <input id="keyIn" type="password" placeholder="Ключ хоста" autocomplete="off" style="flex:1">
+      <button id="goBtn" class="mbtn ghost">Хост</button>
+    </div>
     <div class="err" id="gateErr"></div>
   </div>
 </div>
@@ -189,7 +192,7 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
       <div class="body">
         <div class="menu-section" id="hostOpts">
           <h3>Игра</h3>
-          <div class="mrow">
+          <div class="mrow" id="stopGameRow">
             <div><div class="lbl" id="curGame">—</div><div class="sub" id="curGameSt"></div></div>
             <button class="mbtn ghost small" id="stopGameBtn">Остановить</button>
           </div>
@@ -212,6 +215,13 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
           <div class="mrow">
             <div><div class="lbl">Звук стрима</div><div class="sub">управление громкостью — в самом стриме</div></div>
             <div class="sw on" id="volSw"></div>
+          </div>
+          <div class="mrow">
+            <div><div class="lbl">Сайт комнат (jackbox.fun)</div><div class="sub">адрес открывается в правой панели</div></div>
+          </div>
+          <div style="display:flex;gap:8px;margin:8px 0 4px">
+            <input id="djUrl" placeholder="https://jackbox.fun/" style="flex:1;padding:10px 14px;background:var(--surface2);border:1px solid var(--surface3);border-radius:8px;font-size:13px;outline:none">
+            <button class="mbtn ghost small" id="djApply">Применить</button>
           </div>
         </div>
       </div>
@@ -249,6 +259,15 @@ async function enter(){
   if(!role){$('gateErr').textContent='Неверный ключ';return}
   S.key=k;S.role=role;start();
 }
+// зритель без ключа: сервер выдаёт анонимную viewer-сессию
+$('guestBtn').onclick=async()=>{
+  $('guestBtn').disabled=true;
+  const r=await fetch('/api/state?role=viewer');
+  $('guestBtn').disabled=false;
+  if(!r.ok){$('gateErr').textContent='Сессия недоступна';return}
+  const d=await r.json();
+  S.key=d.key;S.role='viewer';start();
+};
 
 /* ---------- app ---------- */
 let pollTimer=null;
@@ -259,15 +278,19 @@ function start(){
   // наш прокси пересылает Authorization; если его нет, Selkies покажет свой логин внутри iframe)
   $('stream').src='/stream/';
   const isHost=S.role==='host';
-  for(const id of['hideVidBtn','launchBtn','optsBtn'])$(id).style.display=isHost?'flex':'none';
+  for(const id of['hideVidBtn','launchBtn'])$(id).style.display=isHost?'flex':'none';
+  $('optsBtn').style.display='flex';   // опции теперь у всех (вид, jackbox.fun, автостоп-статус)
   $('launchBtn').classList.add('active');
+  $('hostOpts').style.display=isHost?'block':'none';
+  $('stopGameRow').style.display=isHost?'flex':'none';
   poll(); pollTimer=setInterval(poll,4000);
 }
 async function poll(){
   try{
-    const r=await fetch(`/api/state?role=${S.role}&key=${encodeURIComponent(S.key)}`);
+    const r=await fetch(`/api/state?role=${S.role}&key=${encodeURIComponent(S.key||'')}`);
     if(r.status===403){location.reload();return}
     const d=await r.json();
+    if(d.key&&d.key!==S.key)S.key=d.key;   // анонимному гостю сервер выдал ключ сессии
     S.games=d.games||[];
     const st=d.session||{};
     $('statusDot').className = d.selkies_up ? 'ok' : '';
@@ -286,6 +309,8 @@ async function poll(){
     }
     renderGames();
   }catch(e){/* сеть мигнула — не страшно */}
+  // вкладка на переднем плане = живой зритель (сервер смотрит на пульсы api_state)
+  if(document.visibilityState!=='visible')return;
 }
 
 /* ---------- games ---------- */
@@ -352,19 +377,28 @@ $('stopCsBtn').onclick=async()=>{
 };
 $('volSw').onclick=()=>{$('volSw').classList.toggle('on')};
 
-/* ---------- jackbox.fun drawer ---------- */
-const DJ='https://jackbox.fun/';
+/* ---------- jackbox.fun drawer (URL настраивается в опциях, у зрителя тоже) ---------- */
+S.djUrl=localStorage.jbox_dj||'https://jackbox.fun/';
+$('djUrl').value=S.djUrl;
+$('djApply').onclick=()=>{
+  let u=$('djUrl').value.trim();
+  if(u&&!/^https?:\/\//.test(u))u='https://'+u;
+  if(u){S.djUrl=u;localStorage.jbox_dj=u;$('djFrame').src=u;toast('Адрес обновлён')}
+};
+function djLoad(){
+  if($('djFrame').src==='about:blank'||!$('djFrame').src.includes(S.djUrl))$('djFrame').src=S.djUrl;
+}
 $('tabBtn').onclick=()=>{
   const d=$('drawer');
-  if(d.classList.contains('open')){d.classList.remove('open')}
+  if(d.classList.contains('open')){d.classList.remove('open');if(S.role==='host')$('stream').classList.remove('dim')}
   else{
-    if($('djFrame').src==='about:blank')$('djFrame').src=DJ;
+    djLoad();
     d.classList.add('open');
-    if(S.role==='host')$('hideVidBtn').classList.contains('active')||$('stream').classList.add('dim');
+    if(S.role==='host')$('stream').classList.add('dim');
   }
 };
-$('djClose').onclick=()=>{$('drawer').classList.remove('open');$('stream').classList.remove('dim')};
-$('djOpen').onclick=()=>window.open(DJ,'_blank','noopener');
+$('djClose').onclick=()=>{$('drawer').classList.remove('open');if(S.role==='host')$('stream').classList.remove('dim')};
+$('djOpen').onclick=()=>window.open(S.djUrl,'_blank','noopener');
 
 /* ---------- keys ---------- */
 document.addEventListener('keydown',e=>{

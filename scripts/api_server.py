@@ -51,7 +51,11 @@ if _envsh.exists():
             ENV[k] = _expand_shell(v.strip().strip('"').strip("'"))
 
 HOST_PW = ENV.get("SELKIES_BASIC_AUTH_PASSWORD", "")
-VIEW_PW = ENV.get("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD", "")
+# viewer-ключ API: JBOX_VIEW_PW (Selkies viewonly теперь всегда пуст — зритель без промпта)
+VIEW_PW = ENV.get("JBOX_VIEW_PW") or ENV.get("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD", "")
+# Открытый вход для зрителей: страница не спрашивает ключ, гость получает
+# случайный session-id (он же ключ viewer-роли).
+OPEN_VIEWER = _int_env(ENV.get("JBOX_OPEN_VIEWER", "1"), 1) != 0
 STOP_TIMEOUT = _int_env(ENV.get("JBOX_STOP_TIMEOUT", "20"), 20)
 
 # ---------- каталог игр: парсим лаунчеры ----------
@@ -130,20 +134,84 @@ def session_state():
 
 def role_ok(role, key):
     if role == "host": return key and key == HOST_PW
-    if role == "viewer": return key and (key == VIEW_PW or key == HOST_PW)
+    if role == "viewer":
+        if not key: return False
+        if key == VIEW_PW or key == HOST_PW: return True
+        # открытый режим: любой непустой ключ годится как viewer-сессия
+        return bool(OPEN_VIEWER)
     return False
+
+# ---------- session keys (для инжекта Basic в прокси и heartbeat) ----------
+# Ключ хранится в cookie jbox_key (ставит api_state); в codespace все внешние
+# запросы приходят через прокси порта с remote=127.0.0.1, поэтому по IP
+# роли не разделишь — только по cookie.
+def key_of(request):
+    k = request.cookies.get("jbox_key") or request.query.get("key", "")
+    return k
+
+def role_of_key(key):
+    if not key: return None
+    if key == HOST_PW: return "host"
+    if key == VIEW_PW: return "viewer"
+    if OPEN_VIEWER and key.startswith("guest-"): return "viewer"
+    return None
+
+_heartbeats = {}   # key -> ts (обновляется на каждом api_state/poll)
+def mark_heartbeat(key):
+    if key: _heartbeats[key] = time.time()
+    now = time.time()
+    for k in [k for k, t in _heartbeats.items() if now - t > 120]:
+        _heartbeats.pop(k, None)
+
+# живые WS-туннели стрима: главный сигнал «зритель смотрит» (не зависит от
+# троттлинга фоновых вкладок — WebSocket остаётся открытым)
+_ws_active = 0
+
+def anyone_online():
+    global _ws_active
+    if _ws_active > 0:
+        return True
+    now = time.time()
+    return any(now - t < 90 for t in _heartbeats.values())
+
+def _proxy_headers(request):
+    """Заголовки для проксирования в Selkies.
+    Origin/Host вырезаем: клиентский Origin Selkies не знает и отбивает
+    WebSocket handshake (disallowed Origin).
+    Authorization инжектится ВСЕМ (браузерный промпт исключён): host-роль
+    получает host:HOST_PW, зритель/гость — host:VIEW_PW (view-only у самого
+    Selkies, ввод физически запрещён).
+    """
+    import base64
+    skip = {"origin", "host", "x-forwarded-host", "x-forwarded-proto", "x-forwarded-port", "x-forwarded-for", "x-forwarded-ssl", "x-request-id", "x-github-request-id"}
+    h = {k: v for k, v in request.headers.items() if k.lower() not in skip}
+    role = role_of_key(key_of(request))
+    if role == "host" and HOST_PW:
+        token = base64.b64encode(f"host:{HOST_PW}".encode()).decode()
+        h["Authorization"] = f"Basic {token}"
+    elif VIEW_PW:
+        token = base64.b64encode(f"host:{VIEW_PW}".encode()).decode()
+        h["Authorization"] = f"Basic {token}"
+    else:
+        h.pop("Authorization", None)
+    return h
 
 # ---------- Selkies proxy (HTTP + WebSocket) ----------
 async def proxy_handler(request):
     """Проксирует /stream/* в Selkies на 8080 (WebSocket — прозрачно)."""
     target = SELKIES + request.rel_url.path_qs
     is_ws = request.headers.get("Upgrade", "").lower() == "websocket"
+    if request.query.get("key"):
+        pass  # ключ теперь читается из cookie; query тоже работает через key_of()
+    hdrs = _proxy_headers(request)
     if is_ws:
-        ws_server = web.WebSocketResponse()
+        global _ws_active
+        ws_server = web.WebSocketResponse(heartbeat=15)
         await ws_server.prepare(request)
         async with ClientSession(cookies=request.cookies) as cs:
             try:
-                async with cs.ws_connect(target, headers=_auth_headers(request)) as ws_client:
+                async with cs.ws_connect(target, headers=hdrs, heartbeat=15) as ws_client:
+                    _ws_active += 1
                     async def pump(c, s):
                         async for msg in c:
                             if msg.type == WSMsgType.TEXT:
@@ -157,13 +225,15 @@ async def proxy_handler(request):
                     await asyncio.gather(t1, t2, return_exceptions=True)
             except Exception:
                 pass
+            finally:
+                _ws_active = max(0, _ws_active - 1)
         return ws_server
     # обычный HTTP
     body = await request.read()
     try:
         async with ClientSession() as cs:
             async with cs.request(request.method, target, data=body,
-                                  headers=_auth_headers(request),
+                                  headers=hdrs,
                                   allow_redirects=False) as resp:
                 headers = {k: v for k, v in resp.headers.items()
                            if k.lower() not in ("content-encoding", "content-length", "transfer-encoding", "connection")}
@@ -172,33 +242,52 @@ async def proxy_handler(request):
     except Exception as e:
         return web.json_response({"error": f"stream unavailable: {e}"}, status=502)
 
-def _auth_headers(request):
-    h = {k: v for k, v in request.headers.items()
-         if k.lower() in ("authorization", "content-type", "user-agent", "accept", "origin")}
-    return h
-
 # ---------- routes ----------
 async def index(_):
     return web.FileResponse("/opt/jbox/index.html")
 
 async def api_state(request):
     role = request.query.get("role", "viewer")
-    key = request.query.get("key", "")
+    key = request.query.get("key", "") or request.cookies.get("jbox_key", "")
+    # анонимный гость в открытом режиме: выдаём viewer-сессию без вопросов
+    if not key and role == "viewer" and OPEN_VIEWER:
+        import secrets
+        key = "guest-" + secrets.token_urlsafe(8)
     if not role_ok(role, key):
         return web.json_response({"error": "bad role/key"}, status=403)
+    mark_heartbeat(key)   # poll = живая страница
     selkies_up = "LISTEN" in subprocess.run(["ss", "-tln"], capture_output=True, text=True).stdout
-    return web.json_response({
-        "ok": True, "role": role,
+    resp = web.json_response({
+        "ok": True, "role": role, "key": key,
         "games": games(),
         "session": session_state(),
         "stop_timeout": STOP_TIMEOUT,
         "is_codespace": is_codespace(),
         "selkies_up": selkies_up,
     })
+    resp.set_cookie("jbox_key", key, max_age=86400, samesite="Lax", path="/", httponly=False)
+    return resp
+
+async def api_autostop_tick(request):
+    """Heartbeat-автостоп: если живых страниц нет (все закрыли клиент) и
+    прошла отсечка после последнего disconnect — глушим codespace."""
+    if anyone_online():
+        return web.json_response({"ok": True, "action": "none"})
+    ld = read(STATE / "last_disconnect")
+    ld_ts = int(ld) if (ld or "").isdigit() else 0
+    if time.time() < ld_ts + STOP_TIMEOUT:
+        return web.json_response({"ok": True, "action": "wait"})
+    if (STATE / "keepalive").exists():
+        return web.json_response({"ok": True, "action": "kept"})
+    cs = os.environ.get("CODESPACE_NAME", "")
+    if cs:
+        run_bg(f"gh codespace stop {cs!r}")
+        return web.json_response({"ok": True, "action": "stopped"})
+    return web.json_response({"ok": True, "action": "none"})
 
 async def api_launch(request):
     body = await request.json()
-    if not role_ok("host", body.get("key")):
+    if not role_ok("host", body.get("key") or key_of(request)):
         return web.json_response({"error": "host key required"}, status=403)
     gid = (body.get("game_id") or "").strip()
     if not gid or "/" in gid or not any(g["id"] == gid for g in games()):
@@ -267,6 +356,7 @@ app.router.add_post("/api/stop-game", api_stop_game)
 app.router.add_post("/api/verify", api_verify)
 app.router.add_post("/api/stop-session", api_stop_session)
 app.router.add_post("/api/keepalive", api_keepalive)
+app.router.add_post("/api/autostop-tick", api_autostop_tick)
 # proxy всего остального (не /api, не статика) -> Selkies
 app.router.add_route("*", "/stream/{tail:.*}", proxy_handler)
 app.router.add_get("/stream", proxy_handler)
