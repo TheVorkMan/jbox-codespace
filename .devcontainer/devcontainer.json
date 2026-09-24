@@ -17,5 +17,6 @@
     "JBOX_STOP_TIMEOUT": "20"
   },
   "postCreateCommand": "bash .devcontainer/bootstrap.sh",
-  "postStartCommand": "bash .devcontainer/post-start.sh"
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+  "postAttachCommand": "bash .devcontainer/post-start.sh"
 }

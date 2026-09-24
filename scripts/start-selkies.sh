@@ -80,6 +80,7 @@ else
     --enable-shared=true \
     --enable-collab=false \
     --ui-title "Jackbox Stream" \
+    --subfolder "${SELKIES_SUBFOLDER:-/stream}" \
     --use-browser-cursors=true \
     --run-after-connect "${SELKIES_RUN_AFTER_CONNECT:-/opt/jbox/on-connect.sh}" \
     --run-after-disconnect "${SELKIES_RUN_AFTER_DISCONNECT:-/opt/jbox/on-disconnect.sh}" \

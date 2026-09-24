@@ -1,346 +1,379 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jackbox Stream</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Jackbox Cloud</title>
 <style>
-  :root {
-    --bg: #0b0e14; --panel: #131826; --accent: #7c5cff; --accent2: #2dd4bf;
-    --text: #e8ecf4; --muted: #8a93a6; --ok: #34d399; --warn: #fbbf24; --err: #f87171;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  header {
-    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
-    background: var(--panel); border-bottom: 1px solid #1f2740;
-  }
-  header h1 { font-size: 16px; margin: 0; flex: 1; }
-  .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #1f2740; }
-  .badge.host { color: var(--accent2); }
-  .badge.warn { color: var(--warn); }
-  .btn {
-    background: var(--accent); color: #fff; border: 0; padding: 8px 14px;
-    border-radius: 8px; cursor: pointer; font-size: 13px;
-  }
-  .btn.secondary { background: #1f2740; color: var(--text); }
-  .btn.danger { background: #7f1d1d; }
-  .btn:disabled { opacity: .5; cursor: default; }
-  .grid { display: grid; grid-template-columns: 1fr 320px; gap: 12px; padding: 12px; height: calc(100vh - 55px); }
-  .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
-  .panel {
-    background: var(--panel); border: 1px solid #1f2740; border-radius: 10px;
-    padding: 12px; overflow: auto;
-  }
-  .panel h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-  .stream { flex: 1; min-height: 0; border: 1px solid #1f2740; border-radius: 10px; overflow: hidden; background: #000; }
-  .stream iframe { width: 100%; height: 100%; border: 0; }
-  .game-card {
-    display: flex; justify-content: space-between; align-items: center; gap: 8px;
-    padding: 8px 10px; border: 1px solid #1f2740; border-radius: 8px; margin-bottom: 6px;
-  }
-  .game-card b { display: block; }
-  .game-card small { color: var(--muted); }
-  .game-card.running { border-color: var(--ok); }
-  .chat { flex: 1; display: flex; flex-direction: column; min-height: 160px; }
-  #chatlog { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 8px; }
-  #chatlog .msg { margin-bottom: 4px; word-break: break-word; }
-  #chatlog .msg b { color: var(--accent2); }
-  #chatlog .msg .sys { color: var(--muted); font-style: italic; }
-  .chat input[type=text] { flex: 1; margin-right: 6px; }
-  input[type=text] {
-    background: #0f1422; border: 1px solid #2a3350; color: var(--text);
-    padding: 8px 10px; border-radius: 8px; font-size: 13px; width: 100%;
-  }
-  .row { display: flex; gap: 6px; }
-  .muted { color: var(--muted); font-size: 12px; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-right: 4px; background: #1f2740; }
-  .pill.ok { color: var(--ok); }
-  .pill.warn { color: var(--warn); }
-  #stream-wrap { display: none; }
-  #stream-wrap.visible { display: flex; }
-  #login { max-width: 380px; margin: 15vh auto; }
-  #login .panel { padding: 24px; }
-  #login h2 { margin: 0 0 4px; font-size: 20px; color: var(--text); }
-  #login input { margin-bottom: 10px; }
-  #login .btn { width: 100%; }
-  select {
-    background: #0f1422; border: 1px solid #2a3350; color: var(--text);
-    padding: 8px; border-radius: 8px; font-size: 13px; width: 100%;
-  }
-  .qr { text-align: center; margin-top: 8px; }
-  .qr canvas { border: 6px solid #fff; border-radius: 8px; }
-  @media (max-width: 900px) {
-    .grid { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; }
-  }
+/* ---------- Material-минимализм: нейтральная палитра, никаких кислотных цветов ---------- */
+:root{
+  --bg:#101314; --surface:#181c1e; --surface2:#1f2427; --surface3:#262c30;
+  --text:#e6eaec; --text-dim:#9aa4aa; --text-faint:#5f6a70;
+  --accent:#7fb4a2; --accent-dim:#2c3a35; --danger:#c46a5f; --ok:#6aa87f;
+  --radius:12px; --shadow:0 8px 28px rgba(0,0,0,.45);
+  --font:'Roboto',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input{font-family:inherit;color:var(--text)}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:4px}
+
+/* ---------- gate (логин) ---------- */
+#gate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:50}
+#gate .card{background:var(--surface);border-radius:var(--radius);padding:32px;width:min(380px,90vw);box-shadow:var(--shadow)}
+#gate h1{font-size:20px;font-weight:500;margin-bottom:4px}
+#gate p{color:var(--text-dim);margin-bottom:20px;font-size:13px}
+#gate input{width:100%;padding:12px 14px;background:var(--surface2);border:1px solid var(--surface3);border-radius:8px;font-size:15px;outline:none;margin-bottom:12px}
+#gate input:focus{border-color:var(--accent)}
+#gate .row{display:flex;gap:8px}
+.mbtn{padding:11px 18px;border-radius:8px;font-weight:500;font-size:14px;transition:filter .15s,background .15s}
+.mbtn.primary{background:var(--accent);color:#0d1512}
+.mbtn.ghost{background:var(--surface2);color:var(--text)}
+.mbtn:hover{filter:brightness(1.1)}
+.mbtn:disabled{opacity:.5;cursor:default}
+#gate .err{color:var(--danger);font-size:12px;min-height:16px;margin-top:6px}
+
+/* ---------- stage ---------- */
+#stage{position:fixed;inset:0;display:none}
+#stream{position:absolute;inset:0;width:100%;height:100%;border:none;background:#000}
+
+/* ---------- hint-bar: проявляется у верхнего края ---------- */
+#edge{position:fixed;top:0;left:0;right:0;height:44px;z-index:20}
+#bar{position:fixed;top:0;left:50%;transform:translate(-50%,-48px);transition:transform .25s ease;z-index:21;
+  display:flex;align-items:center;gap:6px;background:rgba(24,28,30,.92);backdrop-filter:blur(10px);
+  border-radius:0 0 var(--radius) var(--radius);padding:8px 14px;box-shadow:var(--shadow)}
+#edge:hover~#bar,#bar:hover{transform:translate(-50%,0)}
+.chip{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;background:transparent;color:var(--text-dim);font-size:13px;font-weight:500;transition:background .15s,color .15s}
+.chip:hover{background:var(--surface3);color:var(--text)}
+.chip svg{width:17px;height:17px;fill:currentColor}
+.chip.active{background:var(--accent-dim);color:var(--accent)}
+#statusDot{width:8px;height:8px;border-radius:50%;background:var(--text-faint);margin:0 4px}
+#statusDot.ok{background:var(--ok)}
+#gameLabel{color:var(--text-faint);font-size:12px;margin-right:4px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- overlays ---------- */
+.overlay{position:fixed;inset:0;z-index:30;display:none;background:rgba(10,12,13,.72);backdrop-filter:blur(6px)}
+.overlay.open{display:flex;align-items:center;justify-content:center}
+.panel{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);width:min(560px,92vw);max-height:82vh;display:flex;flex-direction:column;overflow:hidden}
+.panel header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--surface2)}
+.panel header h2{font-size:16px;font-weight:500}
+.panel .body{padding:16px 20px;overflow-y:auto}
+.x{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--text-dim)}
+.x:hover{background:var(--surface3);color:var(--text)}
+.x svg{width:18px;height:18px;fill:currentColor}
+
+/* лаунчер */
+.search{width:100%;padding:10px 14px;background:var(--surface2);border:1px solid var(--surface3);border-radius:8px;font-size:14px;outline:none;margin-bottom:12px}
+.search:focus{border-color:var(--accent)}
+#gameList{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gitem{display:flex;flex-direction:column;gap:2px;padding:12px 14px;background:var(--surface2);border-radius:10px;text-align:left;transition:background .15s;border:1px solid transparent}
+.gitem:hover{background:var(--surface3);border-color:var(--surface3)}
+.gitem .t{font-weight:500;font-size:13.5px}
+.gitem .p{font-size:11.5px;color:var(--text-faint)}
+.gitem.dis{opacity:.45;pointer-events:none}
+.gitem.live{border-color:var(--accent)}
+.gitem .pill{font-size:10px;color:var(--accent);letter-spacing:.4px;text-transform:uppercase}
+#launchNow{margin-top:14px;width:100%;padding:12px;border-radius:8px;background:var(--accent);color:#0d1512;font-weight:500;display:none}
+
+/* меню/опции */
+.menu-section{margin-bottom:18px}
+.menu-section h3{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-faint);margin-bottom:8px}
+.mrow{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--surface2);gap:10px}
+.mrow:last-child{border-bottom:none}
+.mrow .lbl{font-size:14px}
+.mrow .sub{font-size:11.5px;color:var(--text-faint);margin-top:2px}
+.sw{position:relative;width:40px;height:22px;background:var(--surface3);border-radius:11px;transition:background .2s;flex-shrink:0}
+.sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--text-dim);transition:transform .2s,background .2s}
+.sw.on{background:var(--accent-dim)}
+.sw.on::after{transform:translateX(18px);background:var(--accent)}
+.mbtn.danger{background:rgba(196,106,95,.14);color:var(--danger)}
+.mbtn.danger:hover{background:rgba(196,106,95,.24);filter:none}
+.mbtn.small{padding:8px 14px;font-size:13px}
+#stopTimer{font-size:12px;color:var(--text-dim)}
+
+/* jackbox.fun drawer */
+#drawer{position:fixed;top:0;right:0;bottom:0;width:min(480px,45vw);z-index:25;background:var(--surface);box-shadow:-12px 0 40px rgba(0,0,0,.5);transform:translateX(100%);transition:transform .3s ease;display:flex;flex-direction:column}
+#drawer.open{transform:translateX(0)}
+#drawer header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--surface2)}
+#drawer header .t{font-size:14px;font-weight:500;color:var(--text-dim)}
+#drawer iframe{flex:1;border:none;background:#fff}
+#tabBtn{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:24;width:44px;height:96px;
+  background:var(--surface2);border-radius:10px 0 0 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--text-dim);box-shadow:var(--shadow)}
+#tabBtn:hover{background:var(--surface3);color:var(--text)}
+#tabBtn svg{width:20px;height:20px;fill:currentColor}
+#tabBtn .v{font-size:9.5px;letter-spacing:.5px;writing-mode:vertical-rl}
+
+/* fullscreen stream при скрытом оверлее */
+#stream.dim{filter:brightness(.35)}
+body.kbd #bar,body.kbd #tabBtn{display:none}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface3);color:var(--text);padding:10px 18px;border-radius:8px;font-size:13px;z-index:60;transition:transform .25s;box-shadow:var(--shadow)}
+#toast.show{transform:translateX(-50%) translateY(0)}
 </style>
 </head>
 <body>
 
-<!-- ======== логин ======== -->
-<div id="login">
-  <div class="panel">
-    <h2>Jackbox Stream</h2>
-    <p class="muted">Хост вводит ключ сессии (пароль стрима), зрители — ключ зрителя.</p>
-    <input type="text" id="key" placeholder="Ключ" autofocus>
-    <div class="row" style="margin-bottom:10px">
-      <button class="btn secondary" data-role="host">Я хост</button>
-      <button class="btn secondary" data-role="viewer">Я зритель</button>
-    </div>
-    <div class="row">
-      <input type="text" id="nick" placeholder="Ник в чате (необязательно)">
-      <button class="btn" id="enter">Войти</button>
-    </div>
-    <p id="login-err" class="muted" style="color:var(--err)"></p>
+<!-- login -->
+<div id="gate">
+  <div class="card">
+    <h1>Jackbox Cloud</h1>
+    <p>Введите ключ сессии. Ключ хоста даёт управление, ключ зрителя — только просмотр.</p>
+    <input id="keyIn" type="password" placeholder="Ключ сессии" autocomplete="off">
+    <div class="row"><button id="goBtn" class="mbtn primary" style="flex:1">Войти</button></div>
+    <div class="err" id="gateErr"></div>
   </div>
 </div>
 
-<!-- ======== основная вьюха ======== -->
-<div id="main" style="display:none">
-  <header>
-    <h1>Jackbox Stream</h1>
-    <span class="badge" id="badge-role"></span>
-    <span class="badge" id="badge-session"></span>
-    <span class="badge warn" id="badge-autostop" style="display:none"></span>
-    <button class="btn secondary" id="btn-stop-session" style="display:none">Стоп-кнопка</button>
-  </header>
-  <div class="grid">
-    <!-- левая колонка: стрим + лаунчер -->
-    <div class="col">
-      <div class="stream" id="stream-wrap">
-        <iframe id="stream" src="about:blank" allow="fullscreen; autoplay; clipboard-write"></iframe>
-        <div class="panel" id="host-tools" style="display:none">
-          <h2>Лаунчер игр (только для хоста)</h2>
-          <div id="games-list"></div>
-          <p class="muted">Пак докачается автоматически при первом запуске. Выбор игры внутри пака — кликом по превью в стриме.</p>
-        </div>
+<!-- stage -->
+<div id="stage">
+  <iframe id="stream" src="" allow="fullscreen; autoplay; clipboard-read; clipboard-write; gamepad" allowfullscreen></iframe>
+
+  <!-- верхний hint-bar -->
+  <div id="edge"></div>
+  <div id="bar">
+    <span id="statusDot" title="статус"></span>
+    <span id="gameLabel"></span>
+    <button class="chip" id="kbdBtn" title="Скрыть/показать интерфейс (K)">
+      <svg viewBox="0 0 24 24"><path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m-9 3h2v2h-2zm0 3h2v2h-2zM8 8h2v2H8zm0 3h2v2H8zm-1 2H5v-2h2zm0-3H5V8h2zm9 7H8v-2h8zm0-4h-2v-2h2zm0-3h-2V8h2zm3 3h-2v-2h2zm0-3h-2V8h2z"/></svg>
+    </button>
+    <button class="chip" id="fsBtn" title="На весь экран (F)">
+      <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z"/></svg>
+    </button>
+    <button class="chip" id="hideVidBtn" title="Скрыть видео (только хост)" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7M2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2m4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3z"/></svg>
+    </button>
+    <button class="chip" id="launchBtn" title="Лаунчер игр (только хост)" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2m0 16H3V5h18zM5 7h6v2H5zm0 4h6v2H5z"/></svg>
+      Лаунчер
+    </button>
+    <button class="chip" id="optsBtn" title="Опции (только хост)" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.49.49 0 0 0-.49-.42h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.2 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.12.22.37.29.61.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6"/></svg>
+    </button>
+    <button class="chip" id="exitBtn" title="Выйти из сессии">
+      <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4z"/></svg>
+    </button>
+  </div>
+
+  <!-- jackbox.fun drawer -->
+  <div id="drawer">
+    <header>
+      <span class="t">jackbox.fun — комнаты игроков</span>
+      <div style="display:flex;gap:4px">
+        <button class="x" id="djOpen" title="Открыть в новой вкладке"><svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z"/></svg></button>
+        <button class="x" id="djClose"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
       </div>
-      <div class="panel" id="stream-open" style="cursor:pointer">
-        Открыть стрим на весь экран (вкладкой)
+    </header>
+    <iframe id="djFrame" src="about:blank" referrerpolicy="no-referrer"></iframe>
+  </div>
+  <button id="tabBtn" title="jackbox.fun">
+    <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v3h8v-3h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2m0 14H4V4h16z"/></svg>
+    <span class="v">jackbox.fun</span>
+  </button>
+
+  <!-- launcher overlay -->
+  <div class="overlay" id="ovLaunch">
+    <div class="panel">
+      <header><h2>Лаунчер</h2><button class="x" data-close="ovLaunch"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button></header>
+      <div class="body">
+        <input class="search" id="gSearch" placeholder="Поиск игры…">
+        <div id="gameList"></div>
+        <button class="mbtn primary" id="launchNow">Запустить выбранное</button>
       </div>
     </div>
-    <!-- правая колонка: чат + игроки + jackbox.fun -->
-    <div id="right-col" class="col">
-      <div class="panel chat">
-        <h2>Чат</h2>
-        <div id="chatlog"></div>
-        <div class="row">
-          <input type="text" id="chat-text" placeholder="Сообщение...">
-          <button class="btn" id="chat-send">→</button>
+  </div>
+
+  <!-- options overlay -->
+  <div class="overlay" id="ovOpts">
+    <div class="panel" style="width:min(460px,92vw)">
+      <header><h2>Опции</h2><button class="x" data-close="ovOpts"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button></header>
+      <div class="body">
+        <div class="menu-section" id="hostOpts">
+          <h3>Игра</h3>
+          <div class="mrow">
+            <div><div class="lbl" id="curGame">—</div><div class="sub" id="curGameSt"></div></div>
+            <button class="mbtn ghost small" id="stopGameBtn">Остановить</button>
+          </div>
+          <h3>Сессия</h3>
+          <div class="mrow">
+            <div><div class="lbl">Автостоп</div><div class="sub" id="stopTimer">—</div></div>
+            <div class="sw" id="kaSw"></div>
+          </div>
+          <div class="mrow">
+            <div><div class="lbl">Целостность дерева игр</div><div class="sub">проверка лаунчеров и файлов</div></div>
+            <button class="mbtn ghost small" id="verifyBtn">Проверить</button>
+          </div>
+          <div class="mrow">
+            <div><div class="lbl">Остановить codespace</div><div class="sub">сохранить часы, сессия завершится</div></div>
+            <button class="mbtn danger small" id="stopCsBtn">Стоп</button>
+          </div>
         </div>
-      </div>
-      <div class="panel">
-        <h2>Игроки</h2>
-        <div id="players"></div>
-        <div class="qr" id="qr-box"></div>
-        <p class="muted">QR ведёт на эту же страницу — зрители открывают, вводят ключ зрителя и ник.</p>
-      </div>
-      <div class="panel">
-        <h2>jackbox.fun — на другом устройстве</h2>
-        <p class="muted">Рекомендуется открывать jackbox.tv / jackbox.fun на телефоне — контент там лучше смотрится на всю ширину экрана.</p>
-        <div class="row">
-          <button class="btn secondary" id="btn-jbf-embed">Встроить сюда</button>
-          <button class="btn secondary" id="btn-jbf-newtab">Открыть вкладкой</button>
-        </div>
-        <div id="jbf-frame-box" style="display:none; margin-top:8px">
-          <iframe id="jbf" style="width:100%;height:420px;border:1px solid #2a3350;border-radius:8px" src="about:blank"></iframe>
+        <div class="menu-section" id="viewOpts">
+          <h3>Вид</h3>
+          <div class="mrow">
+            <div><div class="lbl">Звук стрима</div><div class="sub">управление громкостью — в самом стриме</div></div>
+            <div class="sw on" id="volSw"></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </div>
+
+<div id="toast"></div>
 
 <script>
-/* ==== config ==== */
-const API = "";  // тот же origin
-let KEY = "", ROLE = "viewer", NICK = "", lastChatId = 0, pollTimer = null, stateTimer = null;
+'use strict';
+const $=id=>document.getElementById(id);
+const S={role:null,key:'',games:[],sel:null,keepalive:true,autoStopAt:null};
 
-/* ==== helpers ==== */
-const $ = id => document.getElementById(id);
-async function api(path, opts) {
-  const r = await fetch(API + path, opts);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
-  return r.json();
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('show'),2600)}
+function openOv(id){$(id).classList.add('open')}
+function closeOv(id){$(id).classList.remove('open')}
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeOv(b.dataset.close));
+document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open')}));
+
+/* ---------- login ---------- */
+async function tryKey(key){
+  const r=await fetch('/api/state?role=host&key='+encodeURIComponent(key));
+  if(r.ok)return 'host';
+  const r2=await fetch('/api/state?role=viewer&key='+encodeURIComponent(key));
+  if(r2.ok)return 'viewer';
+  return null;
 }
-function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
-
-/* ==== login ==== */
-function saveAuth() { localStorage.jbox_auth = JSON.stringify({ key: KEY, role: ROLE, nick: NICK }); }
-function loadAuth() { try { return JSON.parse(localStorage.jbox_auth); } catch { return {}; } }
-
-async function tryLogin(role) {
-  KEY = $("key").value.trim(); ROLE = role; NICK = $("nick").value.trim();
-  if (!KEY) { $("login-err").textContent = "Введите ключ"; return; }
-  try {
-    await api(`/api/state?role=${role}&key=${encodeURIComponent(KEY)}&nick=${encodeURIComponent(NICK)}`);
-    saveAuth(); showMain();
-  } catch (e) { $("login-err").textContent = "Неверный ключ для роли " + role; }
-}
-$("enter").onclick = () => tryLogin(localStorage.jbox_last_role || "viewer");
-document.querySelectorAll("#login [data-role]").forEach(b => {
-  b.onclick = () => { localStorage.jbox_last_role = b.dataset.role; tryLogin(b.dataset.role); };
-});
-
-/* ==== main UI ==== */
-function showMain() {
-  $("login").style.display = "none";
-  $("main").style.display = "block";
-  $("badge-role").textContent = ROLE === "host" ? "ХОСТ" : "ЗРИТЕЛЬ";
-  $("badge-role").className = "badge" + (ROLE === "host" ? " host" : "");
-  $("host-tools").style.display = ROLE === "host" ? "block" : "none";
-  $("btn-stop-session").style.display = ROLE === "host" ? "inline-block" : "none";
-  refreshState(); startChatPoll();
-  stateTimer = setInterval(refreshState, 5000);
+$('goBtn').onclick=enter; $('keyIn').addEventListener('keydown',e=>{if(e.key==='Enter')enter()});
+async function enter(){
+  const k=$('keyIn').value.trim(); if(!k)return;
+  $('goBtn').disabled=true;$('gateErr').textContent='';
+  const role=await tryKey(k);
+  $('goBtn').disabled=false;
+  if(!role){$('gateErr').textContent='Неверный ключ';return}
+  S.key=k;S.role=role;start();
 }
 
-async function refreshState() {
-  try {
-    const s = await api(`/api/state?role=${ROLE}&key=${encodeURIComponent(KEY)}&nick=${encodeURIComponent(NICK)}`);
-    render(s);
-  } catch (e) {
-    $("badge-session").textContent = "сессия недоступна";
-    $("badge-session").className = "badge warn";
-  }
+/* ---------- app ---------- */
+let pollTimer=null;
+function start(){
+  $('gate').style.display='none';
+  $('stage').style.display='block';
+  // стрим на том же origin: /stream/ проксируется нашим сервером (роль авторизации Selkies берёт из cookies? нет —
+  // наш прокси пересылает Authorization; если его нет, Selkies покажет свой логин внутри iframe)
+  $('stream').src='/stream/';
+  const isHost=S.role==='host';
+  for(const id of['hideVidBtn','launchBtn','optsBtn'])$(id).style.display=isHost?'flex':'none';
+  $('launchBtn').classList.add('active');
+  poll(); pollTimer=setInterval(poll,4000);
 }
-
-let streamLoaded = false;
-function render(s) {
-  $("badge-session").textContent = `uptime ${Math.floor(s.session.uptime_s/60)} мин`;
-  // автостоп
-  const as = $("badge-autostop");
-  if (s.session.auto_stop_at) {
-    as.style.display = "inline-block";
-    const sec = Math.max(0, Math.round(s.session.auto_stop_at - Date.now()/1000));
-    as.textContent = `⏻ автостоп через ${sec}s`;
-  } else as.style.display = "none";
-  // игры
-  if (ROLE === "host") renderGames(s.catalog, s.session.game);
-  // игроки
-  const names = Object.keys(s.session.players || {});
-  $("players").innerHTML = names.length
-    ? names.map(n => `<span class="pill ok">${esc(n)}</span>`).join(" ")
-    : '<span class="muted">пока никто не онлайн</span>';
-  renderQR();
-  // iframe стрима — задаём src после того, как узнали stream_url
-  if (!streamLoaded) {
-    streamLoaded = true;
-    $("stream").src = s.stream_url + "/";
-    $("stream-wrap").classList.add("visible");
-  }
-}
-
-function renderGames(cat, currentGame) {
-  const html = [];
-  for (const [pid, p] of Object.entries(cat.packs || {})) {
-    html.push(`<div class="muted" style="margin:6px 0 2px">${esc(p.name)}</div>`);
-    for (const g of (cat.games?.[pid] || [])) {
-      const running = currentGame === g.id;
-      html.push(`
-        <div class="game-card ${running ? "running" : ""}">
-          <div><b>${esc(g.title)}</b><small>${esc(g.orig)} · ${g.player_min}–${g.player_max} игроков</small></div>
-          <button class="btn ${running ? "secondary" : ""}" ${running ? "disabled" : ""} data-game="${g.id}">
-            ${running ? "Идёт" : "Запустить"}
-</button>
-        </div>`);
+async function poll(){
+  try{
+    const r=await fetch(`/api/state?role=${S.role}&key=${encodeURIComponent(S.key)}`);
+    if(r.status===403){location.reload();return}
+    const d=await r.json();
+    S.games=d.games||[];
+    const st=d.session||{};
+    $('statusDot').className = d.selkies_up ? 'ok' : '';
+    $('gameLabel').textContent = st.game ? ('игра: ' + st.game) : '';
+    $('curGame').textContent=st.game||'—';
+    $('curGameSt').textContent=st.game_status?('статус: '+st.game_status):'';
+    // автостоп
+    S.autoStopAt=st.auto_stop_at||null;
+    if(S.autoStopAt){
+      const s=Math.max(0,Math.round(S.autoStopAt-Date.now()/1000));
+      $('stopTimer').textContent=`codespace остановится через ${s} c`;
+      $('kaSw').classList.add('on');
+    }else{
+      $('stopTimer').textContent=`без игры — через ${d.stop_timeout} c после ухода всех`;
+      $('kaSw').classList.remove('on');
     }
+    renderGames();
+  }catch(e){/* сеть мигнула — не страшно */}
+}
+
+/* ---------- games ---------- */
+function renderGames(){
+  const q=($('gSearch').value||'').toLowerCase();
+  const list=$('gameList');list.innerHTML='';
+  const flt=S.games.filter(g=>!q||g.title.toLowerCase().includes(q)||g.id.toLowerCase().includes(q));
+  for(const g of flt){
+    const b=document.createElement('button');
+    b.className='gitem'+(g.ok?'':' dis')+(S.sel===g.id?' live':'');
+    b.innerHTML=`<span class="t">${esc(g.title)}</span><span class="p">${esc(g.pack)}</span>${S.sel===g.id?'<span class="pill">запущена</span>':''}`;
+    b.onclick=()=>{S.sel=g.id;renderGames()};
+    b.ondblclick=()=>launch(g.id);
+    list.appendChild(b);
   }
-  $("games-list").innerHTML = html.join("");
-  $("games-list").querySelectorAll("[data-game]").forEach(b => b.onclick = () => launchGame(b.dataset.game));
+  $('launchNow').style.display=S.sel?'block':'none';
+  $('launchNow').textContent='Запустить: '+(S.games.find(g=>g.id===S.sel)||{title:S.sel}).title;
+}
+$('gSearch').addEventListener('input',renderGames);
+$('launchNow').onclick=()=>S.sel&&launch(S.sel);
+async function launch(id){
+  const r=await fetch('/api/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:S.key,game_id:id})});
+  const d=await r.json();
+  if(d.ok){toast('Запускаю: '+id);closeOv('ovLaunch')}
+  else toast('Ошибка: '+(d.error||r.status));
 }
 
-async function launchGame(gameId) {
-  try {
-    await api("/api/launch", { method: "POST", body: JSON.stringify({ key: KEY, game_id: gameId }) });
-    refreshState();
-  } catch (e) { alert("Ошибка запуска: " + e.message); }
-}
+/* ---------- controls ---------- */
+$('kbdBtn').onclick=()=>{document.body.classList.toggle('kbd');$('kbdBtn').classList.toggle('active')};
+$('fsBtn').onclick=()=>{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()};
+$('hideVidBtn').onclick=()=>{
+  const f=$('stream');f.classList.toggle('dim');
+  $('hideVidBtn').classList.toggle('active',f.classList.contains('dim'));
+};
+$('exitBtn').onclick=()=>{
+  if(confirm('Выйти из сессии?')){clearInterval(pollTimer);location.reload()}
+};
+$('launchBtn').onclick=()=>openOv('ovLaunch');
+$('optsBtn').onclick=()=>openOv('ovOpts');
 
-/* ==== chat ==== */
-function startChatPoll() {
-  clearInterval(pollTimer);
-  const poll = async () => {
-    try {
-      const r = await api(`/api/chat?since=${lastChatId}&nick=${encodeURIComponent(NICK)}`);
-      for (const m of r.msgs) {
-        lastChatId = Math.max(lastChatId, m.id);
-        const div = document.createElement("div");
-        div.className = "msg";
-        div.innerHTML = `<b>${esc(m.nick)}:</b> ${esc(m.text)}`;
-        $("chatlog").appendChild(div);
-      }
-      if (r.msgs.length) $("chatlog").scrollTop = 1e9;
-    } catch (e) {}
-  };
+/* host option rows */
+$('stopGameBtn').onclick=async()=>{await fetch('/api/stop-game',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:S.key})});toast('Игра остановлена');poll()};
+$('kaSw').onclick=async()=>{
+  // «включён» = автостоп разрешён; выключение = ставим keepalive (отмена автостопа)
+  if($('kaSw').classList.contains('on')){
+    await fetch('/api/keepalive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:S.key})});
+    toast('Автостоп отменён (keepalive)');
+  }else{
+    toast('Автостоп вернётся после следующего disconnect');
+  }
   poll();
-  pollTimer = setInterval(poll, 2500);
-}
-$("chat-send").onclick = sendChat;
-$("chat-text").onkeydown = e => { if (e.key === "Enter") sendChat(); };
-async function sendChat() {
-  const text = $("chat-text").value.trim();
-  if (!text) return;
-  $("chat-text").value = "";
-  try {
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ role: ROLE, key: KEY, nick: NICK, text }) });
-  } catch (e) { alert("Не отправлено: " + e.message); }
-}
-
-/* ==== qr ==== */
-function renderQR() {
-  if (!window.QRCode) return;
-  // Хост не должен светить свой управляющий ключ в QR — зритель вводит viewer-пароль сам.
-  if (ROLE === "host") { $("qr-box").innerHTML = "<span class='muted'>QR для зрителей — под viewer-ролью</span>"; return; }
-  const url = location.origin + location.pathname + "?key=" + encodeURIComponent(KEY);
-  const box = $("qr-box");
-  box.innerHTML = "";
-  const canvas = document.createElement("canvas");
-  box.appendChild(canvas);
-  QRCode.toCanvas(canvas, url, { width: 128, margin: 1 }, () => {});
-}
-
-/* ==== jackbox.fun ==== */
-$("btn-jbf-newtab").onclick = () => window.open("https://jackbox.fun", "_blank");
-$("btn-jbf-embed").onclick = () => {
-  const box = $("jbf-frame-box");
-  box.style.display = box.style.display === "none" ? "block" : "none";
-  if (box.style.display === "block" && $("jbf").src === "about:blank") $("jbf").src = "https://jackbox.fun";
 };
-
-/* ==== host actions ==== */
-$("btn-stop-session").onclick = async () => {
-  if (!confirm("Остановить codespace (сохранит core-часы)?")) return;
-  await api("/api/stop-session", { method: "POST", body: JSON.stringify({ key: KEY }) });
-  $("badge-session").textContent = "Останавливаюсь...";
+$('verifyBtn').onclick=async()=>{
+  toast('Проверяю…');
+  const r=await fetch('/api/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:S.key})});
+  const d=await r.json();
+  toast(d.ok?'Целостность: OK':'Есть проблемы — смотрите логи');
+  console.log(d.output);
 };
-$("stream-open").onclick = () => { if (streamLoaded) window.open($("stream").src, "_blank"); };
+$('stopCsBtn').onclick=async()=>{
+  if(!confirm('Остановить codespace? Сессия завершится для всех.'))return;
+  await fetch('/api/stop-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:S.key})});
+  toast('Останавливаю…');
+};
+$('volSw').onclick=()=>{$('volSw').classList.toggle('on')};
 
-/* ==== boot ==== */
-(function boot() {
-  const a = loadAuth();
-  if (a.key) {
-    KEY = a.key; ROLE = a.role || "viewer"; NICK = a.nick || "";
-    $("key").value = KEY; $("nick").value = NICK;
-    showMain();
+/* ---------- jackbox.fun drawer ---------- */
+const DJ='https://jackbox.fun/';
+$('tabBtn').onclick=()=>{
+  const d=$('drawer');
+  if(d.classList.contains('open')){d.classList.remove('open')}
+  else{
+    if($('djFrame').src==='about:blank')$('djFrame').src=DJ;
+    d.classList.add('open');
+    if(S.role==='host')$('hideVidBtn').classList.contains('active')||$('stream').classList.add('dim');
   }
-  // поддержка deep link ?key=...&role=host|viewer (QR со стороны зрителей/хаба)
-  const url = new URL(location);
-  const qk = url.searchParams.get("key");
-  const qr = url.searchParams.get("role");
-  if (qk) {
-    $("key").value = qk;
-    if (qr) { localStorage.jbox_last_role = qr; ROLE = qr; }
-    url.searchParams.delete("key"); url.searchParams.delete("role");
-    history.replaceState({}, "", url.pathname + url.search);
-    if (qr) tryLogin(qr);   // авто-вход по ссылке из QR
-  }
-  const s = document.createElement("script");
-  s.src = "https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js";
-  s.onload = renderQR;
-  document.head.appendChild(s);
-})();
+};
+$('djClose').onclick=()=>{$('drawer').classList.remove('open');$('stream').classList.remove('dim')};
+$('djOpen').onclick=()=>window.open(DJ,'_blank','noopener');
+
+/* ---------- keys ---------- */
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+  if(e.key==='k'||e.key==='K'||e.key==='л'||e.key==='Л')$('kbdBtn').click();
+  if(e.key==='f'||e.key==='F'||e.key==='а'||e.key==='А')$('fsBtn').click();
+  if(e.key==='Escape'){$('drawer').classList.remove('open');document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'))}
+});
+function esc(s){const d=document.createElement('div');d.textContent=s??'';return d.innerHTML}
 </script>
 </body>
 </html>

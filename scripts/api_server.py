@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 """API + веб-клиент для Jackbox-стрима (порт 8081).
 
-Одна страница (/) для всех: UI зависит от роли (host/viewer).
-Стрим остаётся нативным Selkies UI (порт 8080), встроен через <iframe src="/stream/">
-(прокси в этом же сервере — чтобы не зависеть от внешних путей).
+Одна страница для всех, роль определяется ключом (host/viewer).
+Стрим Selkies (порт 8080) встроен через <iframe src="/stream/"> — этот сервер
+проксирует его (HTTP + WebSocket), так что клиент живёт на ОДНОМ origin и
+ Codespaces URL наружу не светится.
 
 API:
-  GET  /api/state?role=host|viewer[&key=...]  — каталог, статус, пароли роли
-  POST /api/launch                            — запустить игру {game_id}
-  POST /api/stop-game                         — остановить игру
-  POST /api/stop-session                      — остановить codespace (сохранить часы)
-  POST /api/keepalive                         — отменить запланированный автостоп
-  GET  /api/chat?since=N                      — длинный опрос чата
-  POST /api/chat                              — отправить сообщение
+  GET  /api/state?role=..&key=..        — игры, статус сессии, флаги роли
+  POST /api/launch {game_id}            — запустить игру (host)
+  POST /api/stop-game                   — остановить игру (host)
+  POST /api/stop-session                — остановить codespace (host)
+  POST /api/keepalive                   — отменить автостоп (host)
+  GET  /api/verify                      — проверить целостность дерева игр (host)
 """
-import asyncio, json, os, re, shutil, subprocess, time
+import asyncio
+import json
+import os
+import re
+import subprocess
+import time
 from pathlib import Path
-from aiohttp import web
 
-CATALOG_PATH = Path("/opt/games/catalog.json")
-CATALOG = json.load(open(CATALOG_PATH)) if CATALOG_PATH.exists() else {"packs": {}, "games": {}}
+from aiohttp import ClientSession, web, WSMsgType
+
 STATE = Path("/opt/jbox/state"); STATE.mkdir(parents=True, exist_ok=True)
+UNIFIED = Path(os.environ.get("JBOX_UNIFIED_DIR", "/opt/jbox-unified"))
 PID = Path("/tmp/jbox-api.pid")
+SELKIES = "http://127.0.0.1:8080"
 
-# ---------- env ----------
-# env.sh пишется для bash: значения могут содержать ${VAR:-default}.
-# start-selkies.sh его source-ит (bash разворачивает сам), а этот сервер
-# парсит файл вручную — поэтому разворачиваем дефолты тут.
+# ---------- env (env.sh парсим вручную: там bash-синтаксис) ----------
 def _expand_shell(v):
     def repl_default(m):
         name, _, default = m.group(1).partition(":-")
@@ -36,10 +39,8 @@ def _expand_shell(v):
     return v
 
 def _int_env(v, default):
-    try:
-        return int(str(v).strip())
-    except (TypeError, ValueError):
-        return default
+    try: return int(str(v).strip())
+    except (TypeError, ValueError): return default
 
 ENV = {}
 _envsh = Path("/opt/jbox/env.sh")
@@ -48,77 +49,133 @@ if _envsh.exists():
         if line.startswith("export "):
             k, _, v = line[7:].partition("=")
             ENV[k] = _expand_shell(v.strip().strip('"').strip("'"))
+
 HOST_PW = ENV.get("SELKIES_BASIC_AUTH_PASSWORD", "")
 VIEW_PW = ENV.get("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD", "")
 STOP_TIMEOUT = _int_env(ENV.get("JBOX_STOP_TIMEOUT", "20"), 20)
 
-# ---------- session state ----------
-session = {
-    "chat": [],            # [{id, nick, text, ts}]
-    "chat_id": 0,
-    "players": {},         # nick -> {ts, last_seen_poll}
-    "auto_stop_at": None,  # ts запланированного автостопа (хук on-disconnect)
-    "started": time.time(),
-}
-
-def _poll_keepalive_file():
-    """Хук on-disconnect пишет keepalive-файл и время отсечки; следим из API."""
-    global session
-    ld = read(STATE / "last_disconnect")
-    ka = (STATE / "keepalive").exists()
-    if ka:
-        session["auto_stop_at"] = None
-    elif ld:
+# ---------- каталог игр: парсим лаунчеры ----------
+def load_games():
+    """[{id, title, pack, desc}] из launchers/*.sh + comments."""
+    games = []
+    ldir = UNIFIED / "launchers"
+    if not ldir.is_dir():
+        return games
+    for f in sorted(ldir.glob("*.sh")):
         try:
-            t = int(ld) + STOP_TIMEOUT
-            if t > time.time() - 300:  # свежая отметка (не старше 5 мин)
-                session["auto_stop_at"] = t
-        except ValueError:
-            pass
+            head = f.read_text(errors="replace").splitlines()[:2]
+            comment = head[1][2:].strip() if len(head) > 1 and head[1].startswith("# ") else ""
+            pack, _, title = comment.partition(" — ")
+            body = f.read_text(errors="replace")
+            m = re.search(r'launchTo (games/[^ ]+\.swf)', body)
+            swf = m.group(1) if m else ""
+            # игра доступна только если swf существует
+            m2 = re.search(r'PACK="\$ROOT/bin/([^"]+)"', body)
+            eng = m2.group(1) if m2 else ""
+            ok = bool(swf) and (UNIFIED / "bin" / eng / swf).exists()
+            games.append({
+                "id": f.stem, "title": title or f.stem,
+                "pack": pack or eng, "ok": ok,
+            })
+        except Exception:
+            continue
+    return games
+
+GAMES_CACHE = {"ts": 0, "list": []}
+def games():
+    now = time.time()
+    if now - GAMES_CACHE["ts"] > 5:
+        GAMES_CACHE["list"] = load_games()
+        GAMES_CACHE["ts"] = now
+    # отдаём только реально запускаемые: у части лаунчеров игр нет в пуле
+    # shared/games (бандл собран из высокорейтинговых) - они мертвы
+    return [g for g in GAMES_CACHE["list"] if g["ok"]]
+
+# ---------- session state ----------
+session = {"auto_stop_at": None, "started": time.time()}
 
 def read(path, default=None):
     try: return Path(path).read_text().strip()
     except Exception: return default
 
+def _poll_keepalive_file():
+    ld = read(STATE / "last_disconnect")
+    if (STATE / "keepalive").exists():
+        session["auto_stop_at"] = None
+    elif ld:
+        try:
+            t = int(ld) + STOP_TIMEOUT
+            if t > time.time() - 300:
+                session["auto_stop_at"] = t
+        except ValueError:
+            pass
+
 def run_bg(cmd):
-    subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    f = open("/tmp/jbox-api-bg.log", "ab")
+    f.write(f"\n[{time.strftime('%m-%d %H:%M:%S')}] $ {cmd}\n".encode())
+    subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
 
 def is_codespace():
     return bool(os.environ.get("CODESPACE_NAME"))
-
-# ---------- helpers ----------
-def role_ok(role, key):
-    if role == "host":  return key and key == HOST_PW
-    if role == "viewer": return key and (key == VIEW_PW or key == HOST_PW)
-    return False
 
 def session_state():
     return {
         "uptime_s": int(time.time() - session["started"]),
         "game": read(STATE / "current_game", None),
+        "game_status": read(STATE / "game_status", ""),
         "game_pid": int(read(STATE / "game.pid", "0") or 0),
         "auto_stop_at": session["auto_stop_at"],
         "is_codespace": is_codespace(),
-        "players": {n: int(time.time() - p["ts"]) for n, p in session["players"].items()},
     }
 
-def stream_url(request):
-    """Прямой URL Selkies-стрима (8080). В Codespaces порт публикуется публично."""
-    cs = os.environ.get("CODESPACE_NAME")
-    if cs:
-        return f"https://{cs}-8080.app.github.dev"
-    env = os.environ.get("JBOX_STREAM_URL")
-    if env:
-        return env.rstrip("/")
-    host = request.host.split(":")[0]
-    scheme = request.headers.get("X-Forwarded-Proto", "http")
-    return f"{scheme}://{host}:8080"
+def role_ok(role, key):
+    if role == "host": return key and key == HOST_PW
+    if role == "viewer": return key and (key == VIEW_PW or key == HOST_PW)
+    return False
 
-def touch_player(nick):
-    nick = nick.strip()[:24]
-    if nick: session["players"][nick] = {"ts": time.time()}
-    # живые игроки = те, кто за последние 30 сек опрашивал
-    session["players"] = {n: p for n, p in session["players"].items() if time.time() - p["ts"] < 30}
+# ---------- Selkies proxy (HTTP + WebSocket) ----------
+async def proxy_handler(request):
+    """Проксирует /stream/* в Selkies на 8080 (WebSocket — прозрачно)."""
+    target = SELKIES + request.rel_url.path_qs
+    is_ws = request.headers.get("Upgrade", "").lower() == "websocket"
+    if is_ws:
+        ws_server = web.WebSocketResponse()
+        await ws_server.prepare(request)
+        async with ClientSession(cookies=request.cookies) as cs:
+            try:
+                async with cs.ws_connect(target, headers=_auth_headers(request)) as ws_client:
+                    async def pump(c, s):
+                        async for msg in c:
+                            if msg.type == WSMsgType.TEXT:
+                                await s.send_str(msg.data)
+                            elif msg.type == WSMsgType.BINARY:
+                                await s.send_bytes(msg.data)
+                            elif msg.type == WSMsgType.ERROR:
+                                break
+                    t1 = asyncio.create_task(pump(ws_client, ws_server))
+                    t2 = asyncio.create_task(pump(ws_server, ws_client))
+                    await asyncio.gather(t1, t2, return_exceptions=True)
+            except Exception:
+                pass
+        return ws_server
+    # обычный HTTP
+    body = await request.read()
+    try:
+        async with ClientSession() as cs:
+            async with cs.request(request.method, target, data=body,
+                                  headers=_auth_headers(request),
+                                  allow_redirects=False) as resp:
+                headers = {k: v for k, v in resp.headers.items()
+                           if k.lower() not in ("content-encoding", "content-length", "transfer-encoding", "connection")}
+                data = await resp.read()
+                return web.Response(status=resp.status, headers=headers, body=data)
+    except Exception as e:
+        return web.json_response({"error": f"stream unavailable: {e}"}, status=502)
+
+def _auth_headers(request):
+    h = {k: v for k, v in request.headers.items()
+         if k.lower() in ("authorization", "content-type", "user-agent", "accept", "origin")}
+    return h
 
 # ---------- routes ----------
 async def index(_):
@@ -129,27 +186,25 @@ async def api_state(request):
     key = request.query.get("key", "")
     if not role_ok(role, key):
         return web.json_response({"error": "bad role/key"}, status=403)
-    touch_player(request.query.get("nick", ""))
+    selkies_up = "LISTEN" in subprocess.run(["ss", "-tln"], capture_output=True, text=True).stdout
     return web.json_response({
         "ok": True, "role": role,
-        "catalog": CATALOG,
+        "games": games(),
         "session": session_state(),
-        "stream_url": stream_url(request),
         "stop_timeout": STOP_TIMEOUT,
-        "selkies_up": shutil.which("ss") and "LISTEN" in subprocess.run(
-            ["ss", "-tln"], capture_output=True, text=True).stdout or False,
+        "is_codespace": is_codespace(),
+        "selkies_up": selkies_up,
     })
 
 async def api_launch(request):
     body = await request.json()
-    key, game_id = body.get("key"), body.get("game_id", "")
-    if not role_ok("host", key):
+    if not role_ok("host", body.get("key")):
         return web.json_response({"error": "host key required"}, status=403)
-    pack = game_id.split(".")[0]
-    if pack not in CATALOG.get("packs", {}):
-        return web.json_response({"error": "unknown pack"}, status=400)
-    run_bg(f"DISPLAY=:99 /opt/jbox/run-game.sh {game_id!r} > /tmp/run-game.log 2>&1")
-    return web.json_response({"ok": True, "game_id": game_id})
+    gid = (body.get("game_id") or "").strip()
+    if not gid or "/" in gid or not any(g["id"] == gid for g in games()):
+        return web.json_response({"error": "unknown game"}, status=400)
+    run_bg(f"DISPLAY=:99 /opt/jbox/run-game.sh {gid!r} >> /tmp/run-game.log 2>&1")
+    return web.json_response({"ok": True, "game_id": gid})
 
 async def api_stop_game(request):
     body = await request.json()
@@ -157,6 +212,13 @@ async def api_stop_game(request):
         return web.json_response({"error": "host key required"}, status=403)
     run_bg("/opt/jbox/stop-game.sh")
     return web.json_response({"ok": True})
+
+async def api_verify(request):
+    body = await request.json()
+    if not role_ok("host", body.get("key")):
+        return web.json_response({"error": "host key required"}, status=403)
+    r = subprocess.run(["bash", "/opt/jbox/run-game.sh", "--verify"], capture_output=True, text=True)
+    return web.json_response({"ok": r.returncode == 0, "output": (r.stdout + r.stderr)[-2000:]})
 
 async def api_keepalive(request):
     body = await request.json()
@@ -170,44 +232,12 @@ async def api_stop_session(request):
     body = await request.json()
     if not role_ok("host", body.get("key")):
         return web.json_response({"error": "host key required"}, status=403)
-    # сохранить изменения (если git) и заглушить машину
-    run_bg("cd /workspaces 2>/dev/null && cd */ && git add -A >/dev/null 2>&1; true")
     cs = os.environ.get("CODESPACE_NAME", "")
     if cs:
         run_bg(f"gh codespace stop {cs!r}")
     return web.json_response({"ok": True, "stopped": bool(cs)})
 
-async def api_chat_post(request):
-    body = await request.json()
-    key, nick, text = body.get("key"), body.get("nick", ""), body.get("text", "").strip()[:300]
-    if not role_ok(body.get("role", "viewer"), key):
-        return web.json_response({"error": "bad key"}, status=403)
-    if not text:
-        return web.json_response({"error": "empty"}, status=400)
-    session["chat_id"] += 1
-    session["chat"].append({"id": session["chat_id"], "nick": nick[:24] or "anon", "text": text, "ts": int(time.time())})
-    session["chat"] = session["chat"][-200:]
-    touch_player(nick)
-    return web.json_response({"ok": True})
-
-async def api_chat_get(request):
-    since = int(request.query.get("since", "0"))
-    touch_player(request.query.get("nick", ""))
-    msgs = [m for m in session["chat"] if m["id"] > since]
-    # long poll: ждём до 25 сек, если пусто
-    if not msgs:
-        try:
-            async def _wait():
-                for _ in range(50):
-                    if any(m["id"] > since for m in session["chat"]): return
-                    await asyncio.sleep(0.5)
-            await _wait()
-        except asyncio.CancelledError:
-            pass
-        msgs = [m for m in session["chat"] if m["id"] > since]
-    return web.json_response({"msgs": msgs, "session": session_state()})
-
-# ---------- CORS (чтобы хаб-сайт мог запрашивать статус) ----------
+# ---------- CORS ----------
 @web.middleware
 async def cors_mw(request, handler):
     if request.method == "OPTIONS":
@@ -226,9 +256,6 @@ async def on_startup(app):
 async def _keepalive_poller():
     while True:
         _poll_keepalive_file()
-        # чистка игроков, ушедших > 60 c
-        now = time.time()
-        session["players"] = {n: p for n, p in session["players"].items() if now - p["ts"] < 60}
         await asyncio.sleep(5)
 
 app = web.Application(client_max_size=1024**2, middlewares=[cors_mw])
@@ -237,11 +264,13 @@ app.router.add_get("/", index)
 app.router.add_get("/api/state", api_state)
 app.router.add_post("/api/launch", api_launch)
 app.router.add_post("/api/stop-game", api_stop_game)
+app.router.add_post("/api/verify", api_verify)
 app.router.add_post("/api/stop-session", api_stop_session)
 app.router.add_post("/api/keepalive", api_keepalive)
-app.router.add_get("/api/chat", api_chat_get)
-app.router.add_post("/api/chat", api_chat_post)
+# proxy всего остального (не /api, не статика) -> Selkies
+app.router.add_route("*", "/stream/{tail:.*}", proxy_handler)
+app.router.add_get("/stream", proxy_handler)
 
 if __name__ == "__main__":
     PID.write_text(str(os.getpid()))
-    web.run_app(app, host="0.0.0.0", port=8081, print=None)
+    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8081")))

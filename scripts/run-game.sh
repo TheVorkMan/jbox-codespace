@@ -1,64 +1,91 @@
 #!/usr/bin/env bash
-# Запуск конкретной игры: run-game.sh <pack.game_id>
-# Пример: run-game.sh jps.tjsp  -> "Смехлыст 3" из Party Starter.
+# =============================================================================
+# run-game.sh - запуск игры из единого дерева /opt/jbox-unified.
 #
-# Логика:
-#   1. Пак уже распакован в /opt/games/runtime/<pack>? -> запускаем бинарник.
-#   2. Нет -> качаем AppImage (install-games.sh) и распаковываем
-#      --appimage-extract (надёжнее FUSE-маунта, не требует /dev/fuse).
-#   3. Выбор игры внутри пака — клик xdotool по превью (координаты из catalog.json).
+#   run-game.sh <GameName>          # по имени лаунчера (launchers/<GameName>.sh)
+#   run-game.sh --list              # список игр
+#   run-game.sh --verify            # проверить целостность дерева
+#
+# Лаунчеры уже знают свой движок (bin/jpp7|jpp11) и путь к swf - просто
+# вызываем их. Состояние для UI пишется в /opt/jbox/state/.
+# =============================================================================
 set -uo pipefail
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GAME_ID="${1:-}"
-FORCE="${2:-}"
-[ -z "$GAME_ID" ] && { echo "usage: run-game.sh <pack.game_id>"; exit 1; }
 
-CATALOG=/opt/games/catalog.json
-PACK="${GAME_ID%%.*}"
-mkdir -p /opt/jbox/state
-echo "$GAME_ID" > /opt/jbox/state/current_game
+ROOT="${JBOX_UNIFIED_DIR:-/opt/jbox-unified}"
+STATE=/opt/jbox/state
+LOG=/tmp/game.log
+RUNLOG=/tmp/run-game.log
+DISPLAY="${DISPLAY:-:99}"
 
-json() { python3 - "$CATALOG" "$@" <<'PY'
-import json, sys
-c = json.load(open(sys.argv[1]))
-path = sys.argv[2:]
-node = c
-for k in path:
-    node = node[k]
-print(node)
-PY
+mkdir -p "$STATE"
+log() { echo "[run] $(date +%T) $*"; }
+
+[ -d "$ROOT/bin/jpp7" ] || [ -d "$ROOT/bin/jpp11" ] || {
+  log "unified tree missing at $ROOT - run install-games.sh first"
+  echo "unified tree missing - run install-games.sh" >&2
+  exit 3
 }
 
-PACK_FILE="$(json packs "$PACK" file)"
-PACK_BIN="$(json packs "$PACK" bin)"
-RT="/opt/games/runtime/$PACK"
-BIN="$RT/$PACK_BIN"
+case "${1:-}" in
+  --list)
+    for f in "$ROOT"/launchers/*.sh; do
+      [ -f "$f" ] || continue
+      desc="$(head -2 "$f" | tail -1 | sed 's/^# //')"
+      printf '%-24s %s\n' "$(basename "$f" .sh)" "$desc"
+    done
+    exit 0
+    ;;
+  --verify)
+    ok=0; bad=0
+    for f in "$ROOT"/launchers/*.sh; do
+      pack="$(grep -o 'PACK="\$ROOT/bin/[^"]*"' "$f" | head -1 | sed 's|.*/bin/||; s|"||')"
+      p="$(grep -o '\-launchTo games/[^ ]*\.swf' "$f" | head -1 | cut -d' ' -f2)"
+      if [ -f "$ROOT/bin/$pack/$p" ]; then ok=$((ok+1)); else echo "BROKEN: $(basename "$f") ($pack/$p)"; bad=$((bad+1)); fi
+    done
+    log "verify: OK=$ok BAD=$bad"
+    [ "$bad" = 0 ] && exit 0 || exit 1
+    ;;
+esac
 
-# --- 1. распаковка при необходимости ---
-if [ ! -x "$BIN" ] || [ "$FORCE" = "--force" ]; then
-  echo "[run] extracting $PACK"
-  bash "$HERE/install-games.sh" "$PACK" || { echo "[run] download failed"; exit 2; }
-  rm -rf "$RT" /opt/games/src/"$PACK".squashfs-root
-  (cd /opt/games/src && "$PACK.AppImage" --appimage-extract >/dev/null 2>&1) || { echo "[run] extract failed"; exit 3; }
-  mv /opt/games/src/squashfs-root "$RT"
+GAME="${1:-}"
+[ -n "$GAME" ] || { echo "usage: run-game.sh <GameName>" >&2; exit 2; }
+LAUNCHER="$ROOT/launchers/$GAME.sh"
+[ -f "$LAUNCHER" ] || { log "no launcher for '$GAME' (see run-game.sh --list)"; exit 2; }
+
+# уже что-то запущено? — остановим (одна игра за раз)
+if [ -f "$STATE/game.pid" ]; then
+  OLD="$(cat "$STATE/game.pid")"
+  if kill -0 "$OLD" 2>/dev/null; then
+    log "stopping previous game (pid $OLD)"
+    kill -- -"$OLD" 2>/dev/null || kill "$OLD" 2>/dev/null || true
+    sleep 1
+  fi
+  rm -f "$STATE/game.pid"
 fi
 
-# --- 2. убить предыдущую игру (если была) ---
-"$HERE/stop-game.sh" >/dev/null 2>&1 || true
+log "launching $GAME"
+echo "$GAME" > "$STATE/current_game"
+echo "starting" > "$STATE/game_status"
+rm -f "$STATE/keepalive"
 
-# --- 3. запуск на стрим-дисплее, аудио в jbox ---
-export DISPLAY="${DISPLAY:-:99}"
-export XDG_RUNTIME_DIR=/tmp/xdg-jbox
-export PULSE_SERVER="unix:$XDG_RUNTIME_DIR/pulse/native"
-export SDL_AUDIODRIVER=pulseaudio
+export DISPLAY
+setsid nohup bash "$LAUNCHER" >"$LOG" 2>&1 &
+PID=$!
+echo "$PID" > "$STATE/game.pid"
 
-setsid nohup "$BIN" >/tmp/game.log 2>&1 &
-GAME_PID=$!
-echo "$GAME_PID" > /opt/jbox/state/game.pid
-echo "[run] started $GAME_ID (pid $GAME_PID, log /tmp/game.log)"
+# Проверка живости: 8 сек на то, чтобы процесс не умер сразу.
+DEAD=0
+for _ in $(seq 1 8); do
+  sleep 1
+  kill -0 "$PID" 2>/dev/null || { DEAD=1; break; }
+done
+if [ "$DEAD" = 1 ] || ! kill -0 "$PID" 2>/dev/null; then
+  echo "failed" > "$STATE/game_status"
+  log "game $GAME died immediately - tail of $LOG:"
+  tail -15 "$LOG" >&2 || true
+  exit 4
+fi
 
-# --- 4. фокус окна игры ---
-sleep "${GAME_START_WAIT:-6}"
-WID="$(xdotool search --onlyvisible --class "$PACK_BIN" | head -1 || true)"
-[ -n "$WID" ] && xdotool windowactivate --sync "$WID" 2>/dev/null || true
-echo "[run] ready (stream: host password / viewer password)"
+echo "running" > "$STATE/game_status"
+log "started $GAME (pid $PID, log $LOG)"
+exit 0

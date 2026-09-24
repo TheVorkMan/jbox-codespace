@@ -1,88 +1,56 @@
-# jbox-codespace — Jackbox Party Pack в браузере (GitHub Codespaces + Selkies)
+# jbox-codespace — Jackbox в GitHub Codespaces (единый бандл)
 
-**Серверная часть** проекта JBox (пара: [jbox-hub](../jbox-hub) — сайт-панель
-для GitHub Pages). Форкни это репо, создай codespace — получишь стрим Jackbox
-из браузера: лаунчер игр, чат, зрители по QR, автостоп для экономии часов.
-
-Стек: **Selkies v2** (WebSocket-стрим, single-binary AppImage), Xvfb+openbox,
-PulseAudio null-sink, API на aiohttp (8081), веб-клиент.
+Сессия Jackbox в браузере: стрим (Selkies), лаунчер и jackbox.fun в одном
+веб-клиенте на порту 8081; стрим проксируется тем же сервером (`/stream/`),
+так что клиент живёт на одном origin и URL codespace наружу не светится.
 
 ## Архитектура
 
 ```
-Браузер хоста ──► 8081 (веб-клиент: лаунчер, чат, QR, автостоп)
-Браузер хоста ──► 8080 (Selkies: видео+аудио+ввод, basic-auth host)
-Телефон игрока ─► 8081 (клиент: просмотр, чат, jackbox.fun)
-Телефон игрока ─► jackbox.tv (комнату игры — напрямую, не через нас)
+браузер ── порт 8081 (этот репозиторий)
+           ├── /            веб-клиент (Material, стрим на всю вкладку)
+           ├── /api/*       лаунчер / опции / автостоп
+           └── /stream/*    прокси в Selkies (HTTP + WebSocket), порт 8080
 ```
 
-## Быстрый старт
+- **Игры** — единое дерево `/opt/jbox-unified` (copper+gold с
+  github.com/tryanddmca/images): `bin/jpp7|jpp11` — движки двух эпох,
+  `launchers/*.sh` — по одному лаунчеру на игру, `shared/games` — пул игр.
+  Лаунчер сам знает свой движок и swf; `api_server.py` парсит лаунчеры и
+  отдаёт в UI только игры, чьи файлы реально есть в пуле.
+- **Установка бандла** — `.devcontainer/install-games.sh` качает copper
+  (55 МБ) и gold (3 части, 4.1 ГБ) и распаковывает **стримингом**
+  (`age -d | zstd -d | tar -x`), без промежуточных файлов на диске.
+  Пассфраза: `JBOX_AGE_PASS` (Codespaces Secret), дефолт — `lickmaballs`.
+- **Хуки Selkies** (`on-connect/on-disconnect`) ведут автостоп: последний
+  зритель отключился → через `JBOX_STOP_TIMEOUT` (по умолчанию 20 c) хаб/API
+  останавливает codespace. `touch /opt/jbox/state/keepalive` отменяет.
 
-1. **Форк** этого репо себе.
-2. (Опционально, рекомендую) Settings → Secrets and variables → Codespaces →
-   New repository secret:
-   - `JBOX_HOST_PW` — пароль хоста
-   - `JBOX_VIEW_PW` — пароль зрителя
-   - `JBOX_PRELOAD` = `1` — качать все паки при провижининге (медленный старт,
-     но потом мгновенный запуск игр)
-   Без секретов пароли сгенерируются сами (лог: `tail /tmp/bootstrap.log | grep passwords`).
-3. Code → **Create codespace on main** (2-core по умолчанию) — или через
-   [jbox-hub](../jbox-hub) сайт-панель.
-4. Открой порт **8081** → введи host-пароль → лаунчер игр.
-5. Зрители: QR/ссылка из клиента, viewer-пароль → просмотр + чат.
+## Быстрый старт (свой форк)
 
-## Лимиты: как влезть в бесплатный Codespaces
+1. Форкните репозиторий, в Settings → Secrets → Codespaces добавьте
+   `JBOX_HOST_PW`, `JBOX_VIEW_PW` (и опционально `JBOX_AGE_PASS`).
+2. Code → Create codespace (2-core — 120 core-часов/мес на бесплатном плане).
+3. Дождитесь `BOOTSTRAP-DONE` в `/tmp/bootstrap.log`; бандл игр ставится там же.
+4. Откройте порт 8081 → ключ `host` из `/opt/jbox/env.sh`.
+5. Игрокам — viewer-ключ и ссылку из хаба (`jbox-hub`, режим «Подключение»).
 
-Codespaces Free = **120 core-часов/мес**, реальное время умножается на ядра.
-`hostRequirements.cpus: 2` → **60 часов** реального стрима в месяц.
+## Отладка
 
-Встроенная экономия:
-- Последний зритель отключился → через `JBOX_STOP_TIMEOUT` (20 c по умолчанию)
-  codespace глушится (`gh codespace stop`). Запуск — обратно из хаба или
-  вкладки Codespaces на GitHub.
-- Кнопка «Стоп-сессия» в веб-клиенте.
-- `touch /opt/jbox/state/keepalive` — отменить запланированный автостоп.
+| Симптом | Где смотреть |
+|---|---|
+| не стартует codespace / bootstrap | `/tmp/bootstrap.log` |
+| бандл не установился | `/tmp/install-games.err`, `bash .devcontainer/install-games.sh` |
+| игра не запустилась | `/tmp/run-game.log`, `/tmp/game.log` |
+| стрим не поднимается | `/tmp/selkies.log`, `bash .devcontainer/doctor.sh` |
+| API не отвечает | `/tmp/api.log`, `/tmp/jbox-api-bg.log` |
 
-Хватать должно: 60 ч × ~10 вечеров по 2 ч. Если нет — VPS-вариант ниже.
+## Лимиты и часы
 
-## Паки
+- 2-core codespace = 120 core-часов/мес бесплатно; автостоп экономит часы.
+- Бандл ~4.6 ГБ на диске (storage-лимит 15 ГБ core-плана — ок).
+- CI-образ с предустановленным бандлом — будущий шаг (`.github/workflows/`).
 
-Три уровня:
-1. **Лениво** (по умолчанию): AppImage докачивается при первом запуске игры
-   (30–60 c), кэш `/tmp/jbox-cache` переживает rebuild контейнера.
-2. **Прелоад**: секрет `JBOX_PRELOAD=1` — все паки при провижининге.
-3. **Готовый образ**: workflow `build-base.yaml` собирает GHCR-образ со всеми
-   распакованными паками (когда доработаете подключение образа в devcontainer).
+## VPS
 
-Источники AppImage-ов — в `catalog.json` (правится под свои паки).
-
-## Безопасность
-
-- Пароли: host (полный доступ) / viewer (только просмотр) — basic-auth Selkies.
-- В Codespaces порты public — без GitHub-авторизации, но Selkies требует пароль.
-- GitHub-токен (для хаба) — только на твоём браузере, в codespace не попадает.
-
-## Структура
-
-```
-catalog.json            — паки (AppImage) + игры (окна, лимиты игроков)
-.devcontainer/          — devcontainer.json, bootstrap, install-*, post-start
-scripts/                — start-selkies, run-game, stop-game, on-connect/disconnect, api_server.py
-web/index.html          — веб-клиент (host/viewer)
-.github/workflows/      — build-base.yaml (GHCR-образ со всеми паками)
-vps/                    — Docker-вариант для своего VPS (без лимитов, WebRTC)
-```
-
-## VPS-вариант
-
-Свой сервер = нет лимитов, свой домен, можно включить WebRTC (`--mode webrtc`).
-Инструкция — [vps/README.md](vps/README.md). Хаб умеет открывать URL VPS в
-том же интерфейсе.
-
-## Идеи на будущее
-
-- [ ] Интеграция Jackbox Utility (окна 7+ паков)
-- [ ] Коллекции паков: 2–3 GHCR-образа вместо одного большого
-- [ ] Автостарт комнаты через Ephemeral API (+QR с room code)
-- [ ] Голосовой чат зрителей (WebRTC)
-- [ ] Cloudflare Access перед Codespaces URL (нормальная auth поверх basic-auth)
+`vps/` — тот же стек в Docker без лимитов: `docker compose up` в `vps/`.

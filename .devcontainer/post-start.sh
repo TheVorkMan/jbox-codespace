@@ -6,12 +6,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- синхронизация файлов из репо (репо живёт дольше контейнера) ---
 if [ -d "$HERE/../scripts" ]; then
-  sudo mkdir -p /opt/jbox /opt/games
+  sudo mkdir -p /opt/jbox /opt/jbox-unified
   sudo cp -f "$HERE/../scripts/"*.sh /opt/jbox/ 2>/dev/null || true
+  sudo cp -f "$HERE/../scripts/age_run.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/../scripts/api_server.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/install-games.sh" /opt/jbox/ 2>/dev/null || true
-  sudo cp -f "$HERE/../catalog.json" /opt/games/catalog.json 2>/dev/null || true
   sudo chmod +x /opt/jbox/*.sh 2>/dev/null || true
+  # скрипты пишут в /opt/* от пользователя — отдать владение
+  sudo chown -R "$(id -u):$(id -g)" /opt/jbox /opt/jbox-unified 2>/dev/null || true
 fi
 
 # --- Selkies ещё не установлен? (после полного rebuild контейнера) ---
