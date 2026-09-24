@@ -87,7 +87,10 @@ else
 fi
 
 echo "== env file =="
-# Пароли: из Codespaces Secrets (JBOX_HOST_PW / JBOX_VIEW_PW) или случайные.
+# Пароли: host из Codespaces Secret (JBOX_HOST_PW) или случайный.
+# Оба пароля НЕпустые: браузерный промпт исключён тем, что прокси (api_server)
+# инжектит Basic сам — host-пароль для хоста, viewonly для зрителей/гостей.
+# Роль (контроллер/только-просмотр) принуждает сам Selkies по паролю.
 if [ ! -f /opt/jbox/env.sh ]; then
   HOSTPW="${JBOX_HOST_PW:-$(head -c16 /dev/urandom | md5sum | cut -c1-10)}"
   VIEWPW="${JBOX_VIEW_PW:-$(head -c16 /dev/urandom | md5sum | cut -c1-10)}"
@@ -98,10 +101,12 @@ export SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=$VIEWPW
 export SELKIES_ENABLE_BASIC_AUTH=true
 export SELKIES_STOP_TIMEOUT=\${JBOX_STOP_TIMEOUT:-20}
 export JBOX_STOP_TIMEOUT=\${JBOX_STOP_TIMEOUT:-20}
+export JBOX_VIEW_PW=$VIEWPW
 export JBOX_AGE_PASS=\${JBOX_AGE_PASS:-lickmaballs}
+export JBOX_OPEN_VIEWER=1
 EOF
   sudo chown "$(id -u):$(id -g)" /opt/jbox/env.sh
-  echo "[bootstrap] passwords: host=$HOSTPW viewer=$VIEWPW (also in /opt/jbox/env.sh)"
+  echo "[bootstrap] host password: $HOSTPW (in /opt/jbox/env.sh); viewers enter without a password"
 fi
 
 echo "== web client =="
