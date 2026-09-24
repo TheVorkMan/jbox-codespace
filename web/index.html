@@ -38,12 +38,13 @@ input{font-family:inherit;color:var(--text)}
 #stage{position:fixed;inset:0;display:none}
 #stream{position:absolute;inset:0;width:100%;height:100%;border:none;background:#000}
 
-/* ---------- hint-bar: проявляется у верхнего края ---------- */
-#edge{position:fixed;top:0;left:0;right:0;height:44px;z-index:20}
-#bar{position:fixed;top:0;left:50%;transform:translate(-50%,-48px);transition:transform .25s ease;z-index:21;
+/* ---------- hint-bar: выезжает при подводе курсора к верхнему краю.
+   Никаких полос-перехватчиков на всю ширину: панель блокирует клики,
+   только когда видима. Раскрытие/скрытие — по позиции курсора (JS). ---------- */
+#bar{position:fixed;top:0;left:50%;transform:translate(-50%,-56px);transition:transform .25s ease;z-index:21;
   display:flex;align-items:center;gap:6px;background:rgba(24,28,30,.92);backdrop-filter:blur(10px);
   border-radius:0 0 var(--radius) var(--radius);padding:8px 14px;box-shadow:var(--shadow)}
-#edge:hover~#bar,#bar:hover{transform:translate(-50%,0)}
+#bar.open{transform:translate(-50%,0)}
 .chip{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;background:transparent;color:var(--text-dim);font-size:13px;font-weight:500;transition:background .15s,color .15s}
 .chip:hover{background:var(--surface3);color:var(--text)}
 .chip svg{width:17px;height:17px;fill:currentColor}
@@ -107,7 +108,7 @@ input{font-family:inherit;color:var(--text)}
 /* fullscreen stream при скрытом оверлее */
 #stream.dim{filter:brightness(.35)}
 body.kbd #bar,body.kbd #tabBtn{display:none}
-#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface3);color:var(--text);padding:10px 18px;border-radius:8px;font-size:13px;z-index:60;transition:transform .25s;box-shadow:var(--shadow)}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface3);color:var(--text);padding:10px 18px;border-radius:8px;font-size:13px;z-index:60;transition:transform .25s;box-shadow:var(--shadow);pointer-events:none}
 #toast.show{transform:translateX(-50%) translateY(0)}
 </style>
 </head>
@@ -132,7 +133,6 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
   <iframe id="stream" src="" allow="fullscreen; autoplay; clipboard-read; clipboard-write; gamepad" allowfullscreen></iframe>
 
   <!-- верхний hint-bar -->
-  <div id="edge"></div>
   <div id="bar">
     <span id="statusDot" title="статус"></span>
     <span id="gameLabel"></span>
@@ -326,7 +326,7 @@ function renderGames(){
     const live=st===g.id;
     const b=document.createElement('button');
     b.className='gitem'+(g.ok?'':' dis')+(live?' live':'');
-    b.innerHTML=`<span class="t">${esc(g.title)}</span><span class="p">${esc(g.pack)}</span>${live?'<span class="pill">запущена</span>':''}`;
+    b.innerHTML=`<span class="t">${esc(g.title)}</span><span class="p">${esc(g.pack)}</span>${live?'<span class="pill">выбрано</span>':''}`;
     b.onclick=()=>{S.sel=g.id;renderGames()};
     b.ondblclick=()=>launch(g.id);
     list.appendChild(b);
@@ -346,7 +346,11 @@ async function launch(id){
 }
 
 /* ---------- controls ---------- */
-$('kbdBtn').onclick=()=>{document.body.classList.toggle('kbd');$('kbdBtn').classList.toggle('active')};
+$('kbdBtn').onclick=()=>{
+  document.body.classList.toggle('kbd');
+  $('kbdBtn').classList.toggle('active');
+  if(document.body.classList.contains('kbd'))bar.classList.remove('open');
+};
 $('fsBtn').onclick=()=>{document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()};
 $('hideVidBtn').onclick=()=>{
   const f=$('stream');f.classList.toggle('dim');
@@ -406,6 +410,14 @@ $('tabBtn').onclick=()=>{
 };
 $('djClose').onclick=()=>{$('drawer').classList.remove('open');if(S.role==='host')$('stream').classList.remove('dim')};
 $('djOpen').onclick=()=>window.open(S.djUrl,'_blank','noopener');
+
+/* ---------- hint-bar: показ/скрытие по позиции курсора ---------- */
+const bar=$('bar');
+document.addEventListener('mousemove',e=>{
+  if(document.body.classList.contains('kbd'))return;
+  if(e.clientY<=12)bar.classList.add('open');          // курсор у верхнего края
+  else if(!bar.matches(':hover')&&e.clientY>72)bar.classList.remove('open'); // ушёл вниз мимо панели
+});
 
 /* ---------- keys ---------- */
 document.addEventListener('keydown',e=>{
