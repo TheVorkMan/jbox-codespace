@@ -94,6 +94,12 @@ echo "== env file =="
 if [ ! -f /opt/jbox/env.sh ]; then
   HOSTPW="${JBOX_HOST_PW:-$(head -c16 /dev/urandom | md5sum | cut -c1-10)}"
   VIEWPW="${JBOX_VIEW_PW:-$(head -c16 /dev/urandom | md5sum | cut -c1-10)}"
+  # SECURITY: равные пароли = гость через прокси получает host-пароль и
+  # полный контроль стрима. Перегенерируем viewer.
+  if [ "$HOSTPW" = "$VIEWPW" ]; then
+    VIEWPW="$(head -c16 /dev/urandom | md5sum | cut -c1-10)"
+    echo "[bootstrap] WARN: JBOX_HOST_PW == JBOX_VIEW_PW — viewer password regenerated"
+  fi
   sudo tee /opt/jbox/env.sh >/dev/null <<EOF
 export SELKIES_BASIC_AUTH_USER=host
 export SELKIES_BASIC_AUTH_PASSWORD=$HOSTPW
