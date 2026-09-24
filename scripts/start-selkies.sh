@@ -15,14 +15,16 @@ PIDFILE=/opt/jbox/state/selkies.pid
 mkdir -p /opt/jbox/state
 
 # --- X: Xvfb 1920x1080 + openbox ---
-# 1920x1080: веб-клиент запрашивает ресайз под своё окно (~1920x966).
+# 854x480: фиксируем 480p — CPU-энкод на 2 ядрах тянет его без лагов
+# (1920x1080 упирался в CPU). Ресайз клиента запрещён (--manual-resolution),
+# иначе браузер снова вытянет разрешение под размер окна.
 export DISPLAY="${DISPLAY:-:99}"
 if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
   DISPNUM="${DISPLAY#:}"; DISPNUM="${DISPNUM%%.*}"
   # stale-локи после падения Xvfb — без их очистки новый Xvfb не поднимется
   rm -f "/tmp/.X${DISPNUM}-lock" "/tmp/.X11-unix/X${DISPNUM}"
-  echo "[start] starting Xvfb $DISPLAY (1920x1080)"
-  Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
+  echo "[start] starting Xvfb $DISPLAY (854x480)"
+  Xvfb "$DISPLAY" -screen 0 854x480x24 -nolisten tcp >/tmp/xvfb.log 2>&1 &
   sleep 1
   if ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
     echo "[start] Xvfb FAILED — /tmp/xvfb.log:" >&2
@@ -68,8 +70,12 @@ else
     --mode websockets \
     --encoder h264enc \
     --use-cpu=true \
-    --framerate "30,8-60" \
-    --video-bitrate "6000,100-8000" \
+    --framerate "${SELKIES_FRAMERATE:-30,8-60}" \
+    --video-bitrate "${SELKIES_VIDEO_BITRATE:-2500,100-4000}" \
+    --manual-resolution "${SELKIES_MANUAL_RESOLUTION:-true}" \
+    --manual-width "${SELKIES_MANUAL_WIDTH:-854}" \
+    --manual-height "${SELKIES_MANUAL_HEIGHT:-480}" \
+    --enable-resize=false \
     --audio-enabled=true \
     --audio-device-name jbox.monitor \
     --enable-basic-auth="${SELKIES_ENABLE_BASIC_AUTH:-true}" \
