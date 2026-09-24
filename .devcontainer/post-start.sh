@@ -21,6 +21,21 @@ if [ -d "$HERE/../scripts" ]; then
   sudo chown -R "$(id -u):$(id -g)" /opt/jbox /opt/jbox-unified 2>/dev/null || true
 fi
 
+# --- SECURITY fixup: равные host/viewonly пароли дают зрителю контроллер ---
+# Selkies назначает потолок "viewer" только если viewonly != host-пароль.
+# env.sh уже существующий bootstrap не перегенерирует — лечим тут, на каждом старте.
+if [ -f /opt/jbox/env.sh ]; then
+  # shellcheck disable=SC1091
+  . /opt/jbox/env.sh 2>/dev/null || true
+  if [ -n "${SELKIES_BASIC_AUTH_PASSWORD:-}" ] \
+     && [ "${SELKIES_BASIC_AUTH_PASSWORD}" = "${SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD:-}" ]; then
+    NEWV="$(head -c16 /dev/urandom | md5sum | cut -c1-10)"
+    sed -i "s|^export SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=.*|export SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=$NEWV|" /opt/jbox/env.sh
+    sed -i "s|^export JBOX_VIEW_PW=.*|export JBOX_VIEW_PW=$NEWV|" /opt/jbox/env.sh
+    echo "[post-start] WARN: host и viewonly пароли были равны — viewonly перегенерирован (зрители теперь без инпута)"
+  fi
+fi
+
 # --- Selkies ещё не установлен? (после полного rebuild контейнера) ---
 if [ ! -x /opt/selkies/selkies ]; then
   echo "[post-start] selkies missing — running bootstrap"
