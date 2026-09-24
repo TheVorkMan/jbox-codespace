@@ -321,7 +321,7 @@ function renderGames(){
   for(const g of flt){
     const b=document.createElement('button');
     b.className='gitem'+(g.ok?'':' dis')+(S.sel===g.id?' live':'');
-    b.innerHTML=`<span class="t">${esc(g.title)}</span><span class="p">${esc(g.pack)}</span>${S.sel===g.id?'<span class="pill">запущена</span>':''}`;
+    b.innerHTML=`<span class="t">${esc(g.pack)}</span><span class="p">${esc(g.title)}</span>${S.sel===g.id?'<span class="pill">запущена</span>':''}`;
     b.onclick=()=>{S.sel=g.id;renderGames()};
     b.ondblclick=()=>launch(g.id);
     list.appendChild(b);

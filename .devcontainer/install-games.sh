@@ -35,13 +35,13 @@ mkdir -p "$DEST"
 
 # Готовность бандла: лаунчеры + оба движка + хоть одна игра.
 bundle_ready() {
-  local n
+  local n g
   n=$(ls "$DEST/launchers"/*.sh 2>/dev/null | wc -l)
+  g=$(ls "$DEST/shared/games" 2>/dev/null | wc -l)
   [ "$n" -ge 20 ] \
     && [ -f "$DEST/bin/jpp7/TJPP7_OpenGL" ] \
     && [ -f "$DEST/bin/jpp11/TJPP11_OpenGL" ] \
-    && [ -d "$DEST/shared/games" ] \
-    && [ -n "$(ls "$DEST/shared/games" 2>/dev/null | head -1)" ]
+    && [ "$g" -ge 5 ]
 }
 
 if bundle_ready; then
@@ -85,9 +85,41 @@ else
   log "gold: extracted OK"
 fi
 
+# --- 3. нормализация: gold кладёт игры в КОРЕНЬ дерева -----------------------
+# Приводим к ожидаемому layout: bin/ + launchers/ + shared/games/*.
+# Заодно распаковываем вложенные архивы *.tar.zst (внутри gold лежат игры).
+log "normalize: layout (games -> shared/games)"
+mkdir -p "$DEST/shared/games"
+for d in "$DEST"/*/; do
+  n="$(basename "$d")"
+  case "$n" in bin|shared|launchers|.*) continue ;; esac
+  # игровая папка: есть gameManifest.json или swf на верхнем уровне
+  if [ -f "${d}gameManifest.json" ] || ls "${d}"*.swf >/dev/null 2>&1; then
+    if [ -e "$DEST/shared/games/$n" ]; then
+      rm -rf "$d"   # дубль из вложенного архива/повторного прогона
+    else
+      mv "$d" "$DEST/shared/games/$n"
+    fi
+  fi
+done
+for z in "$DEST"/*.tar.zst; do
+  [ -f "$z" ] || continue
+  log "normalize: extracting inner $(basename "$z")"
+  TMP="$DEST/.inner_tmp"
+  rm -rf "$TMP"; mkdir -p "$TMP"
+  zstd -dc "$z" 2>>"$ERRLOG" | tar -xpf - -C "$TMP" \
+    || fail "inner archive $(basename "$z") failed"
+  find "$TMP" -mindepth 1 -maxdepth 1 -type d | while read -r c; do
+    n="$(basename "$c")"
+    if [ -e "$DEST/shared/games/$n" ]; then rm -rf "$c"; else mv "$c" "$DEST/shared/games/$n"; fi
+  done
+  rm -rf "$TMP" "$z"
+done
+
 bundle_ready || fail "bundle extracted but incomplete - check $DEST and $ERRLOG"
 
-# games-симлинк у движков должен указывать на shared/games (на случай reloc)
+# games-симлинк у движков должен указывать на shared/games (copper может
+# привезти битый/абсолютный симлинк)
 for eng in "$DEST"/bin/*/; do
   [ -e "${eng}games" ] || ln -sfn ../../shared/games "${eng}games"
 done
