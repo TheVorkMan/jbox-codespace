@@ -12,6 +12,10 @@ if [ -d "$HERE/../scripts" ]; then
   sudo cp -f "$HERE/../scripts/altgames.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/../scripts/api_server.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/install-games.sh" /opt/jbox/ 2>/dev/null || true
+  # веб-клиент: без этого правки index.html не доезжают до работающего контейнера
+  # (bootstrap выполняется один раз при создании, post-start — на каждом старте)
+  sudo cp -f "$HERE/../web/index.html" /opt/jbox/index.html 2>/dev/null || true
+  sudo chown "$(id -u):$(id -g)" /opt/jbox/index.html 2>/dev/null || true
   sudo chmod +x /opt/jbox/*.sh 2>/dev/null || true
   # лаунчеры из репо перекрывают содержимое бандла (там могут быть пропуски)
   if [ -d "$HERE/../launchers" ] && [ -d /opt/jbox-unified/launchers ]; then
