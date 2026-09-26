@@ -83,7 +83,8 @@ input{font-family:inherit;color:var(--text)}
 .gitem.dis{opacity:.45;pointer-events:none}
 .gitem.live{border-color:var(--accent)}
 .gitem .pill{font-size:10px;color:var(--accent);letter-spacing:.4px;text-transform:uppercase}
-#launchNow{margin-top:14px;width:100%;padding:12px;border-radius:8px;background:var(--accent);color:#0d1512;font-weight:500;display:none}
+/* видимость кнопки управляется футером #launchBar (JS) — display:none здесь её прятал навсегда */
+#launchNow{width:100%;padding:12px;border-radius:8px;background:var(--accent);color:#0d1512;font-weight:500}
 
 /* меню/опции */
 .menu-section{margin-bottom:18px}
@@ -102,10 +103,10 @@ input{font-family:inherit;color:var(--text)}
 #stopTimer{font-size:12px;color:var(--text-dim)}
 
 /* altgames: загрузка и управление «другими играми» */
-.agup{display:flex;gap:8px;margin:8px 0 4px}
+.agup{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
 .agup input{padding:10px 14px;background:var(--surface2);border:1px solid var(--surface3);border-radius:8px;font-size:13px;outline:none}
 .agup input:focus{border-color:var(--accent)}
-#agUrl{flex:1}#agDest{width:150px}
+#agUrl{flex:1;min-width:180px}#agDest{flex:0 1 150px;min-width:120px}
 #agProg{height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;margin-top:8px;display:none}
 #agProgF{height:100%;width:0;background:var(--accent);transition:width .5s}
 #agMsg{font-size:11.5px;color:var(--text-dim);margin:6px 0 4px;min-height:14px}
@@ -217,7 +218,7 @@ body.kbd #bar,body.kbd #tabBtn,body.kbd #barHandle{display:none}
 
   <!-- options overlay -->
   <div class="overlay" id="ovOpts">
-    <div class="panel" style="width:min(460px,92vw)">
+    <div class="panel" style="width:min(600px,94vw)">
       <header><h2>Опции</h2><button class="x" data-close="ovOpts"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button></header>
       <div class="body">
         <div class="menu-section" id="hostOpts">
