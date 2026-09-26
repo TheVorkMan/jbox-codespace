@@ -45,6 +45,14 @@ input{font-family:inherit;color:var(--text)}
   display:flex;align-items:center;gap:6px;background:rgba(24,28,30,.92);backdrop-filter:blur(10px);
   border-radius:0 0 var(--radius) var(--radius);padding:8px 14px;box-shadow:var(--shadow)}
 #bar.open{transform:translate(-50%,0)}
+/* язычок вызова панели: единственный способ открыть меню, когда курсор над
+   iframe (mousemove из iframe в родительский документ не долетает) */
+#barHandle{position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:20;width:64px;height:18px;
+  display:flex;align-items:center;justify-content:center;background:rgba(24,28,30,.75);backdrop-filter:blur(8px);
+  border-radius:0 0 10px 10px;color:var(--text-dim);cursor:pointer;box-shadow:var(--shadow)}
+#barHandle:hover{color:var(--text);background:rgba(24,28,30,.92)}
+#barHandle svg{width:16px;height:16px;fill:currentColor}
+#bar.open + #barHandle{display:none}
 .chip{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;background:transparent;color:var(--text-dim);font-size:13px;font-weight:500;transition:background .15s,color .15s}
 .chip:hover{background:var(--surface3);color:var(--text)}
 .chip svg{width:17px;height:17px;fill:currentColor}
@@ -122,7 +130,7 @@ input{font-family:inherit;color:var(--text)}
 
 /* fullscreen stream при скрытом оверлее */
 #stream.dim{filter:brightness(.35)}
-body.kbd #bar,body.kbd #tabBtn{display:none}
+body.kbd #bar,body.kbd #tabBtn,body.kbd #barHandle{display:none}
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface3);color:var(--text);padding:10px 18px;border-radius:8px;font-size:13px;z-index:60;transition:transform .25s;box-shadow:var(--shadow);pointer-events:none}
 #toast.show{transform:translateX(-50%) translateY(0)}
 </style>
@@ -170,6 +178,11 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
     <button class="chip" id="exitBtn" title="Выйти из сессии">
       <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4z"/></svg>
     </button>
+  </div>
+
+  <!-- язычок вызова панели (виден, когда панель скрыта) -->
+  <div id="barHandle" title="Меню (H)">
+    <svg viewBox="0 0 24 24"><path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
   </div>
 
   <!-- jackbox.fun drawer -->
@@ -520,12 +533,27 @@ $('agAddBtn').onclick=async()=>{
 };
 $('agCancelBtn').onclick=async()=>{if(ag.jobId){await apiPost('/api/altgames/cancel',{id:ag.jobId});toast('Отменяю…')}};
 
-/* ---------- hint-bar: показ/скрытие по позиции курсора ---------- */
+/* ---------- hint-bar: показ/скрытие ---------- */
 const bar=$('bar');
+let barTimer=null;
+function openBar(v){
+  bar.classList.toggle('open',v);
+  clearTimeout(barTimer);
+  // тач-устройства: панель без мыши не закрыть — авто-скрытие через 6 c
+  if(v&&matchMedia('(pointer:coarse)').matches)barTimer=setTimeout(()=>bar.classList.remove('open'),6000);
+}
 document.addEventListener('mousemove',e=>{
   if(document.body.classList.contains('kbd'))return;
-  if(e.clientY<=12)bar.classList.add('open');          // курсор у верхнего края
-  else if(!bar.matches(':hover')&&e.clientY>72)bar.classList.remove('open'); // ушёл вниз мимо панели
+  if(e.clientY<=12)openBar(true);          // курсор у верхнего края
+  else if(!bar.matches(':hover')&&e.clientY>72)openBar(false); // ушёл вниз мимо панели
+});
+const barHandle=$('barHandle');
+barHandle.addEventListener('mouseenter',()=>openBar(true));
+barHandle.addEventListener('click',()=>openBar(true));
+document.addEventListener('click',e=>{   // клик/тап мимо панели — закрыть
+  if(!bar.classList.contains('open'))return;
+  if(e.target.closest('#bar')||e.target.closest('#barHandle'))return;
+  openBar(false);
 });
 
 /* ---------- keys ---------- */
@@ -533,6 +561,7 @@ document.addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
   if(e.key==='k'||e.key==='K'||e.key==='л'||e.key==='Л')$('kbdBtn').click();
   if(e.key==='f'||e.key==='F'||e.key==='а'||e.key==='А')$('fsBtn').click();
+  if(e.key==='h'||e.key==='H'||e.key==='р'||e.key==='Р')openBar(!bar.classList.contains('open'));
   if(e.key==='Escape'){$('drawer').classList.remove('open');document.querySelectorAll('.overlay.open').forEach(o=>o.classList.remove('open'))}
 });
 function esc(s){const d=document.createElement('div');d.textContent=s??'';return d.innerHTML}
