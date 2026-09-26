@@ -13,16 +13,27 @@ API:
   POST /api/stop-session                — остановить codespace (host)
   POST /api/keepalive                   — отменить автостоп (host)
   GET  /api/verify                      — проверить целостность дерева игр (host)
+  GET  /api/altgames/list               — alt-игры + активные загрузки (host)
+  POST /api/altgames/add                — скачать ZIP по прямой ссылке и распаковать (host)
+  GET  /api/altgames/job?id=..          — прогресс одной загрузки
+  POST /api/altgames/cancel             — отменить загрузку (host)
+  POST /api/altgames/remove             — удалить alt-игру (host)
+  POST /api/altgames/config             — указать/поправить exe игры (host)
 """
 import asyncio
 import json
 import os
 import re
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
 from aiohttp import ClientSession, web, WSMsgType
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import altgames
 
 STATE = Path("/opt/jbox/state"); STATE.mkdir(parents=True, exist_ok=True)
 UNIFIED = Path(os.environ.get("JBOX_UNIFIED_DIR", "/opt/jbox-unified"))
@@ -90,7 +101,13 @@ GAMES_CACHE = {"ts": 0, "list": []}
 def games():
     now = time.time()
     if now - GAMES_CACHE["ts"] > 5:
+        # jackbox-игры из лаунчеров бандла + alt-игры (манифесты /opt/jbox-alt)
         GAMES_CACHE["list"] = load_games()
+        try:
+            have = {g["id"] for g in GAMES_CACHE["list"]}
+            GAMES_CACHE["list"] += [a for a in altgames.alt_game_entries() if a["id"] not in have]
+        except Exception:
+            pass
         GAMES_CACHE["ts"] = now
     # отдаём только реально запускаемые: у части лаунчеров игр нет в пуле
     # shared/games (бандл собран из высокорейтинговых) - они мертвы
@@ -129,9 +146,18 @@ def session_state():
         "game": read(STATE / "current_game", None),
         "game_status": read(STATE / "game_status", ""),
         "game_pid": int(read(STATE / "game.pid", "0") or 0),
+        "game_kind": _game_kind(read(STATE / "current_game", None)),
         "auto_stop_at": session["auto_stop_at"],
         "is_codespace": is_codespace(),
     }
+
+def _game_kind(gid):
+    if not gid:
+        return None
+    for g in games():
+        if g["id"] == gid:
+            return "alt" if g.get("is_alt") else "jackbox"
+    return None
 
 def role_ok(role, key):
     if role == "host": return key and key == HOST_PW
@@ -291,10 +317,101 @@ async def api_launch(request):
     if not role_ok("host", body.get("key") or key_of(request)):
         return web.json_response({"error": "host key required"}, status=403)
     gid = (body.get("game_id") or "").strip()
-    if not gid or "/" in gid or not any(g["id"] == gid for g in games()):
+    if not gid or "/" in gid:
         return web.json_response({"error": "unknown game"}, status=400)
-    run_bg(f"DISPLAY=:99 /opt/jbox/run-game.sh {gid!r} >> /tmp/run-game.log 2>&1")
-    return web.json_response({"ok": True, "game_id": gid})
+    script = "/opt/jbox/run-alt.sh" if any(g["id"] == gid and g.get("is_alt") for g in games()) else "/opt/jbox/run-game.sh"
+    if not any(g["id"] == gid for g in games()):
+        return web.json_response({"error": "unknown game"}, status=400)
+    run_bg(f"DISPLAY=:99 {script} {gid!r} >> /tmp/run-game.log 2>&1")
+    return web.json_response({"ok": True, "game_id": gid, "runner": script})
+
+# ---------- altgames: загрузка ZIP по прямой ссылке ----------
+async def _host_json(request):
+    """{ok, body, error?}: host-авторизация для altgames-эндпоинтов."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not role_ok("host", body.get("key") or key_of(request)):
+        return {"ok": False, "body": body, "error": "host key required"}
+    return {"ok": True, "body": body}
+
+async def api_alt_list(request):
+    if not role_ok("host", key_of(request)) and not role_ok("viewer", key_of(request)):
+        return web.json_response({"error": "bad key"}, status=403)
+    return web.json_response({"ok": True, "games": altgames.alt_game_entries(),
+                              "jobs": altgames.list_jobs(), "log_tail": altgames.log_tail(25)})
+
+async def api_alt_add(request):
+    auth = await _host_json(request)
+    if not auth["ok"]:
+        return web.json_response({"error": auth["error"]}, status=403)
+    b = auth["body"]
+    url = str(b.get("url") or "").strip()
+    dest = str(b.get("dest") or "").strip()
+    if not re.match(r"^https?://", url):
+        return web.json_response({"error": "нужна прямая http(s)-ссылка на ZIP"}, status=400)
+    if not altgames.safe_dest(dest):
+        return web.json_response({"error": "некорректный путь распаковки"}, status=400)
+    if b.get("size"):
+        pass  # размер берём из Content-Length сами
+    import secrets
+    job_id = "d" + secrets.token_urlsafe(6).replace("-", "x").replace("_", "x")
+    altgames.write_job(job_id, {"phase": "queued", "url": url, "dest": dest,
+                                "pct": 0.0, "done": 0, "total": 0})
+    threading.Thread(
+        target=altgames.download_and_install,
+        args=(job_id, url, dest),
+        kwargs={"name": b.get("name"), "title": b.get("title"),
+                "exe": b.get("exe"), "kind": b.get("kind"), "cmd": b.get("cmd")},
+        daemon=True,
+    ).start()
+    return web.json_response({"ok": True, "id": job_id})
+
+async def api_alt_job(request):
+    if not (role_ok("host", key_of(request)) or role_ok("viewer", key_of(request))):
+        return web.json_response({"error": "bad key"}, status=403)
+    j = altgames.read_job(request.query.get("id", ""))
+    if not j:
+        return web.json_response({"error": "задача не найдена"}, status=404)
+    return web.json_response({"ok": True, "job": j})
+
+async def api_alt_cancel(request):
+    auth = await _host_json(request)
+    if not auth["ok"]:
+        return web.json_response({"error": auth["error"]}, status=403)
+    jid = str(auth["body"].get("id") or "")
+    j = altgames.read_job(jid)
+    if not j:
+        return web.json_response({"error": "задача не найдена"}, status=404)
+    if j.get("phase") in ("done", "error", "cancelled"):
+        return web.json_response({"ok": True, "note": "уже завершена"})
+    altgames.request_cancel(jid)
+    return web.json_response({"ok": True})
+
+async def api_alt_remove(request):
+    auth = await _host_json(request)
+    if not auth["ok"]:
+        return web.json_response({"error": auth["error"]}, status=403)
+    gid = str(auth["body"].get("game_id") or "").strip()
+    try:
+        altgames.remove_game(gid)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"ok": True})
+
+async def api_alt_config(request):
+    auth = await _host_json(request)
+    if not auth["ok"]:
+        return web.json_response({"error": auth["error"]}, status=403)
+    b = auth["body"]
+    gid = str(b.get("game_id") or "").strip()
+    try:
+        m = altgames.update_config(gid, exe=b.get("exe"), title=b.get("title"),
+                                   kind=b.get("kind"), cmd=b.get("cmd"))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"ok": True, "manifest": m})
 
 async def api_stop_game(request):
     body = await request.json()
@@ -350,6 +467,11 @@ async def _keepalive_poller():
 
 app = web.Application(client_max_size=1024**2, middlewares=[cors_mw])
 app.on_startup.append(on_startup)
+# прерванные рестартом загрузки — в error (иначе висят «downloading» вечно)
+try:
+    altgames.startup_sweep()
+except Exception:
+    pass
 app.router.add_get("/", index)
 app.router.add_get("/api/state", api_state)
 app.router.add_post("/api/launch", api_launch)
@@ -358,6 +480,12 @@ app.router.add_post("/api/verify", api_verify)
 app.router.add_post("/api/stop-session", api_stop_session)
 app.router.add_post("/api/keepalive", api_keepalive)
 app.router.add_post("/api/autostop-tick", api_autostop_tick)
+app.router.add_get("/api/altgames/list", api_alt_list)
+app.router.add_post("/api/altgames/add", api_alt_add)
+app.router.add_get("/api/altgames/job", api_alt_job)
+app.router.add_post("/api/altgames/cancel", api_alt_cancel)
+app.router.add_post("/api/altgames/remove", api_alt_remove)
+app.router.add_post("/api/altgames/config", api_alt_config)
 # proxy всего остального (не /api, не статика) -> Selkies
 app.router.add_route("*", "/stream/{tail:.*}", proxy_handler)
 app.router.add_get("/stream", proxy_handler)

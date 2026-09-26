@@ -70,12 +70,27 @@ fi
 # xserver-xorg-core: cvt/gtf для modeline (см. блок install выше); xfonts-base — шрифты для Xvfb/openbox. FUSE: noble — libfuse2t64, jammy — libfuse2
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libfuse2t64 2>/dev/null || sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q libfuse2 2>/dev/null || true
 
+# --- alt-игры: Wine (Windows-игры, например Godot-игры вроде Dub Together) ---
+# wine64 тянет 32-битные компоненты по зависимостям; xkb-data/x11 libs —
+# часто отсутствуют у Godot/X11-приложений внутри Wine.
+sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q wine64 2>/dev/null \
+  || echo "[bootstrap] WARN: wine64 не установился — alt-игры под Wine будут недоступны"
+if command -v wine64 >/dev/null 2>&1 || command -v wine >/dev/null 2>&1; then
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+    libxkbcommon-x11-0 libxkbcommon0 libxinerama1 libxcursor1 libxrandr2 libxi6 \
+    libxss1 libxxf86vm1 libxfixes3 libxrender1 libxext6 libx11-xcb1 \
+    fonts-wine 2>/dev/null || true
+  echo "[bootstrap] wine: $(command -v wine64 || command -v wine)"
+else
+  echo "[bootstrap] wine not available — alt/wine games disabled"
+fi
+
 # --- каталоги ---
 # /opt принадлежит root; отдаём рабочие каталоги пользователю, чтобы все
 # скрипты (install-selkies, install-games, run-game, api_server) писали без sudo.
 echo "== dirs =="
-sudo mkdir -p /opt/selkies /opt/jbox/state /opt/jbox-unified
-sudo chown -R "$(id -u):$(id -g)" /opt/selkies /opt/jbox /opt/jbox-unified
+sudo mkdir -p /opt/selkies /opt/jbox/state /opt/jbox-unified /opt/jbox-alt
+sudo chown -R "$(id -u):$(id -g)" /opt/selkies /opt/jbox /opt/jbox-unified /opt/jbox-alt
 
 # --- python deps для API (aiohttp) ---
 sudo pip3 install --quiet --break-system-packages aiohttp 2>/dev/null \

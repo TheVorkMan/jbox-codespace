@@ -9,6 +9,7 @@ if [ -d "$HERE/../scripts" ]; then
   sudo mkdir -p /opt/jbox /opt/jbox-unified
   sudo cp -f "$HERE/../scripts/"*.sh /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/../scripts/age_run.py" /opt/jbox/ 2>/dev/null || true
+  sudo cp -f "$HERE/../scripts/altgames.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/../scripts/api_server.py" /opt/jbox/ 2>/dev/null || true
   sudo cp -f "$HERE/install-games.sh" /opt/jbox/ 2>/dev/null || true
   sudo chmod +x /opt/jbox/*.sh 2>/dev/null || true
@@ -18,7 +19,13 @@ if [ -d "$HERE/../scripts" ]; then
     sudo chmod +x /opt/jbox-unified/launchers/*.sh 2>/dev/null || true
   fi
   # скрипты пишут в /opt/* от пользователя — отдать владение
-  sudo chown -R "$(id -u):$(id -g)" /opt/jbox /opt/jbox-unified 2>/dev/null || true
+  sudo mkdir -p /opt/jbox-alt
+  sudo chown -R "$(id -u):$(id -g)" /opt/jbox /opt/jbox-unified /opt/jbox-alt 2>/dev/null || true
+  # манифесты alt-игр из репо (объявленные вручную игры, без _auto-префикса)
+  if [ -d "$HERE/../altgames/manifests" ]; then
+    sudo mkdir -p /opt/jbox-alt/manifests
+    sudo cp -f "$HERE/../altgames/manifests/"*.json /opt/jbox-alt/manifests/ 2>/dev/null || true
+  fi
 fi
 
 # --- SECURITY fixup: равные host/viewonly пароли дают зрителю контроллер ---
@@ -56,6 +63,11 @@ if [ "$RESTART_STREAM" = 1 ]; then
   sleep 1
 fi
 nohup bash /opt/jbox/start-selkies.sh >/tmp/start-selkies.out 2>&1 &
+# API перезапускаем всегда: иначе после git pull новый api_server.py не
+# поднимется (порт занят старым процессом) и правки не вступят в силу
+pkill -f api_server.py 2>/dev/null || true
+rm -f /tmp/jbox-api.pid
+sleep 0.5
 nohup python3 /opt/jbox/api_server.py >/tmp/api.log 2>&1 &
 
 echo "[post-start] stream http://localhost:8080  api http://localhost:8081"

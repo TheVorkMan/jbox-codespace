@@ -1,0 +1,10 @@
+{
+  "_note": "ШАБЛОН. Файлы игры появятся в контейнере после загрузки ZIP через Опции хоста → Другие игры (или POST /api/altgames/add). Пока exe не указан (здесь или в _auto-манифесте загрузчика), игра в лаунчере не показывается.",
+  "_workshop": "Контент Steam Workshop для Dub Together steamcmd+anonymous скачать НЕ может — грузите его этой же системой загрузки (отдельный ZIP, dest внутри папки игры, например dub-together/workshop).",
+  "game_id": "DubTogether",
+  "title": "Dub Together",
+  "kind": "wine",
+  "dir": "dub-together",
+  "exe": "",
+  "args": ""
+}

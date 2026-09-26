@@ -93,6 +93,21 @@ input{font-family:inherit;color:var(--text)}
 .mbtn.small{padding:8px 14px;font-size:13px}
 #stopTimer{font-size:12px;color:var(--text-dim)}
 
+/* altgames: загрузка и управление «другими играми» */
+.agup{display:flex;gap:8px;margin:8px 0 4px}
+.agup input{padding:10px 14px;background:var(--surface2);border:1px solid var(--surface3);border-radius:8px;font-size:13px;outline:none}
+.agup input:focus{border-color:var(--accent)}
+#agUrl{flex:1}#agDest{width:150px}
+#agProg{height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;margin-top:8px;display:none}
+#agProgF{height:100%;width:0;background:var(--accent);transition:width .5s}
+#agMsg{font-size:11.5px;color:var(--text-dim);margin:6px 0 4px;min-height:14px}
+.agrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--surface2)}
+.agrow:last-child{border-bottom:none}
+.agrow .lbl{font-size:13.5px}
+.agrow .sub{font-size:11px;color:var(--text-faint);margin-top:2px}
+.altgrp{grid-column:1/-1;font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-faint);margin:8px 0 2px;border-bottom:1px solid var(--surface2);padding-bottom:4px}
+.altgrp:first-child{margin-top:0}
+
 /* jackbox.fun drawer */
 #drawer{position:fixed;top:0;right:0;bottom:0;width:min(480px,45vw);z-index:25;background:var(--surface);box-shadow:-12px 0 40px rgba(0,0,0,.5);transform:translateX(100%);transition:transform .3s ease;display:flex;flex-direction:column}
 #drawer.open{transform:translateX(0)}
@@ -198,6 +213,21 @@ body.kbd #bar,body.kbd #tabBtn{display:none}
             <div><div class="lbl" id="curGame">—</div><div class="sub" id="curGameSt"></div></div>
             <button class="mbtn ghost small" id="stopGameBtn">Остановить</button>
           </div>
+          <h3>Другие игры</h3>
+          <div class="mrow" id="agJobRow" style="display:none">
+            <div style="flex:1"><div class="lbl" id="agJobName">Загрузка…</div><div class="sub" id="agJobSub"></div><div id="agProg"><div id="agProgF"></div></div></div>
+            <button class="mbtn ghost small" id="agCancelBtn">Отменить</button>
+          </div>
+          <div class="mrow">
+            <div><div class="lbl">Загрузить игру (ZIP)</div><div class="sub">прямая ссылка на незашифрованный архив + путь распаковки</div></div>
+          </div>
+          <div class="agup">
+            <input id="agUrl" placeholder="https://…/game.zip">
+            <input id="agDest" placeholder="dub-together">
+            <button class="mbtn primary small" id="agAddBtn">Загрузить</button>
+          </div>
+          <div id="agMsg"></div>
+          <div id="agList"></div>
           <h3>Сессия</h3>
           <div class="mrow">
             <div><div class="lbl">Автостоп</div><div class="sub" id="stopTimer">—</div></div>
@@ -286,6 +316,7 @@ function start(){
   $('hostOpts').style.display=isHost?'block':'none';
   $('stopGameRow').style.display=isHost?'flex':'none';
   poll(); pollTimer=setInterval(poll,4000);
+  refreshAlt();   // секция «Другие игры» в опциях хоста
 }
 async function poll(){
   try{
@@ -322,7 +353,16 @@ function renderGames(){
   const list=$('gameList');list.innerHTML='';
   const st=(S.session&&S.session.game)||null;   // реально запущенная игра (по state)
   const flt=S.games.filter(g=>!q||g.title.toLowerCase().includes(q)||g.id.toLowerCase().includes(q));
+  // секции: Jackbox-бандл и alt-игры (загруженные через «Другие игры»)
+  let lastGrp=null;
   for(const g of flt){
+    const grp=g.is_alt?'alt':'jb';
+    if(grp!==lastGrp){
+      lastGrp=grp;
+      const h=document.createElement('div');h.className='altgrp';
+      h.textContent=grp==='alt'?'Другие игры':'Jackbox';
+      list.appendChild(h);
+    }
     const live=st===g.id;
     const b=document.createElement('button');
     b.className='gitem'+(g.ok?'':' dis')+(live?' live':'');
@@ -410,6 +450,75 @@ $('tabBtn').onclick=()=>{
 };
 $('djClose').onclick=()=>{$('drawer').classList.remove('open');if(S.role==='host')$('stream').classList.remove('dim')};
 $('djOpen').onclick=()=>window.open(S.djUrl,'_blank','noopener');
+
+/* ---------- altgames: другие игры (загрузка ZIP, манифесты, удаление) ---------- */
+const ag={jobId:null,poll:null};
+function agStartPoll(){if(!ag.poll)ag.poll=setInterval(agPollJob,1200)}
+function agStopPoll(){clearInterval(ag.poll);ag.poll=null;$('agJobRow').style.display='none'}
+function agPhaseTxt(ph){return{queued:'в очереди',downloading:'скачивание',extracting:'распаковка',finalizing:'завершение',done:'готово',error:'ошибка',cancelled:'отменено'}[ph]||ph}
+async function agPollJob(){
+  if(!ag.jobId){agStopPoll();return}
+  try{
+    const r=await fetch('/api/altgames/job?id='+encodeURIComponent(ag.jobId));
+    if(r.status===404){ag.jobId=null;agStopPoll();return}
+    const d=await r.json();const j=d.job||{};
+    $('agJobRow').style.display='flex';
+    $('agJobName').textContent=((j.title||'').trim()||j.dest||'загрузка')+' — '+agPhaseTxt(j.phase);
+    $('agJobSub').textContent=j.error||j.log||'';
+    $('agProg').style.display='block';
+    $('agProgF').style.width=(j.pct||0)+'%';
+    if(['done','error','cancelled'].includes(j.phase)){
+      ag.jobId=null;agStopPoll();
+      if(j.phase==='done'){
+        toast('Игра загружена: '+(j.game_id||''));
+        $('agMsg').textContent=j.exe?'':((j.exe_hints&&j.exe_hints.length)?('Кандидаты точки запуска: '+j.exe_hints.slice(0,3).join(', ')+' — уточните кнопкой «Указать exe»'):'exe не найден — укажите точку запуска кнопкой «Указать exe»');
+      }else if(j.phase==='error')toast('Ошибка загрузки: '+(j.error||''));
+      refreshAlt();
+    }
+  }catch(e){}
+}
+async function apiPost(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({key:S.key},body||{}))});
+  return r.json().catch(()=>({}));
+}
+async function refreshAlt(){
+  if(S.role!=='host')return;
+  try{
+    const r=await fetch('/api/altgames/list');
+    if(!r.ok)return;
+    const d=await r.json();
+    // страница перезагрузилась посреди загрузки — продолжаем показывать прогресс
+    const act=(d.jobs||[]).find(j=>!['done','error','cancelled'].includes(j.phase));
+    if(act&&!ag.jobId){ag.jobId=act.id;agStartPoll();agPollJob()}
+    const list=$('agList');list.innerHTML='';
+    for(const g of d.games||[]){
+      const row=document.createElement('div');row.className='agrow';
+      row.innerHTML=`<div><div class="lbl">${esc(g.title)}</div><div class="sub">${g.ok?'exe настроен':'exe не указан'} · ${esc(g.kind||'')}</div></div>`;
+      const btns=document.createElement('div');btns.style.cssText='display:flex;gap:6px';
+      const cfg=document.createElement('button');cfg.className='mbtn ghost small';cfg.textContent='Указать exe';
+      cfg.onclick=()=>{const v=prompt('Точка запуска (путь внутри папки игры, напр. DubTogether.exe):',(g.exe||''));if(v)agConfig(g.id,v)};
+      const del=document.createElement('button');del.className='mbtn danger small';del.textContent='Удалить';
+      del.onclick=async()=>{if(!confirm('Удалить «'+g.title+'» вместе с файлами?'))return;await apiPost('/api/altgames/remove',{game_id:g.id});toast('Удалено');refreshAlt()};
+      btns.append(cfg,del);row.appendChild(btns);list.appendChild(row);
+    }
+  }catch(e){}
+}
+async function agConfig(gid,exe){
+  const d=await apiPost('/api/altgames/config',{game_id:gid,exe});
+  if(d.ok){toast('exe обновлён');$('agMsg').textContent='';refreshAlt()}
+  else toast('Ошибка: '+(d.error||'?'));
+}
+$('agAddBtn').onclick=async()=>{
+  const url=$('agUrl').value.trim(),dest=$('agDest').value.trim();
+  if(!/^https?:\/\//.test(url)){$('agMsg').textContent='Нужна прямая http(s)-ссылка на ZIP';return}
+  if(!dest){$('agMsg').textContent='Укажите путь распаковки, напр. dub-together';return}
+  $('agAddBtn').disabled=true;$('agMsg').textContent='Стартую загрузку…';
+  const d=await apiPost('/api/altgames/add',{url,dest});
+  $('agAddBtn').disabled=false;
+  if(d.ok){ag.jobId=d.id;$('agMsg').textContent='';agStartPoll();agPollJob();toast('Загрузка началась')}
+  else $('agMsg').textContent='Ошибка: '+(d.error||'?');
+};
+$('agCancelBtn').onclick=async()=>{if(ag.jobId){await apiPost('/api/altgames/cancel',{id:ag.jobId});toast('Отменяю…')}};
 
 /* ---------- hint-bar: показ/скрытие по позиции курсора ---------- */
 const bar=$('bar');
